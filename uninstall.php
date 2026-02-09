@@ -1,23 +1,46 @@
 <?php
 /**
- * Cleaning when uninstalling Security Hardener.
+ * Uninstall script for Security Hardener
+ *
+ * Fired when the plugin is uninstalled.
+ *
+ * @package Security_Hardener
+ * @since 0.5
  */
-if ( ! defined('WP_UNINSTALL_PLUGIN') ) {
-    exit;
+
+// If uninstall not called from WordPress, exit
+if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
+	exit;
 }
 
-// 1) Main option
-delete_option('wphn_hardener_options');
+// Delete plugin options
+delete_option( 'wpsh_options' );
 
-// 2) Clear rate-limit transients (without SQL):
-// We delete any transients starting with 'wphn_login_' (adjust the prefix if you use another one).
-$all_options = array_keys( wp_load_alloptions() );
-foreach ( $all_options as $opt_name ) {
-    if ( str_starts_with( $opt_name, '_transient_wph_failed_' )
-        || str_starts_with( $opt_name, '_transient_timeout_wph_failed_' ) ) {
-        // Rebuild the transient key (remove the '_transient_' prefix).
-        $transient_key = substr( $opt_name, strlen('_transient_') );
-        // This removes both the transient and its timeout in any backend (including object cache).
-        delete_transient( $transient_key );
-    }
+// Delete security logs
+delete_option( 'wpsh_security_logs' );
+
+// Clean up transients for login rate limiting
+global $wpdb;
+
+// Delete login attempts transients using efficient SQL query
+$wpdb->query(
+	"DELETE FROM {$wpdb->options} 
+	WHERE option_name LIKE '_transient_wpsh_login_attempts_%' 
+	OR option_name LIKE '_transient_timeout_wpsh_login_attempts_%'
+	OR option_name LIKE '_transient_wpsh_login_blocked_%'
+	OR option_name LIKE '_transient_timeout_wpsh_login_blocked_%'"
+);
+
+// If using object cache, flush it to remove any cached transients
+if ( function_exists( 'wp_cache_flush' ) ) {
+	wp_cache_flush();
+}
+
+// Optional: Clear any scheduled cron jobs if we add them in the future
+// Example: wp_clear_scheduled_hook( 'wpsh_cleanup_logs' );
+
+// Log uninstallation (optional - only if you want to keep a record)
+// Note: This creates a log entry before deleting options
+if ( function_exists( 'error_log' ) ) {
+	error_log( 'Security Hardener plugin uninstalled at ' . current_time( 'mysql' ) );
 }

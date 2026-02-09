@@ -1,66 +1,185 @@
-=== Security Hardener ===
+==== Security Hardener ===
 Contributors: marc4
-Tags: security, hardening, headers, brute force
+Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.0
-Tested up to: 6.8
-Requires PHP: 7.4
-Stable tag: 0.3
+Tested up to: 6.9
+Requires PHP: 8.0
+Stable tag: 0.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Basic hardening: secure headers, enumeration blocking, generic login errors, IP-based rate limiting, and optional restriction of the REST API.
+Basic hardening: secure headers, user enumeration blocking, generic login errors, IP-based rate limiting, and comprehensive WordPress security improvements.
 
 == Description ==
 
-**Security Hardener** is inspired by the official WordPress hardening guide (Advanced Administration / Security / Hardening). It uses the platform’s standard functions and does not override core. Applies a prudent set of defenses:
+**Security Hardener** implements the official WordPress hardening guidelines from the [WordPress Advanced Administration / Security / Hardening](https://developer.wordpress.org/advanced-administration/security/hardening/) documentation. It uses WordPress core functions and follows best practices without modifying core files.
 
-- **Security headers**: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `COOP/CORP`.  
-- **HSTS** (optional; HTTPS only).  
-- **Basic nonce-based CSP** (optional; requires testing).  
-- **Disable XML-RPC and pingbacks** (optional; enabled by default).  
-- **Hide the WordPress version** in the `<head>`.  
-- **Block user enumeration** via `/?author=` by returning 404.  
-- **Generic login errors** (prevents information leakage).  
-- **IP-based login rate limiting** with transients (configurable threshold and window).  
-- **Restrict the REST API** to authenticated users, with a **minimal allowlist** for oEmbed/index.
+= Key Features =
 
-> ⚠️ **Important:** The **restrict REST API** option and **CSP** can affect integrations and plugins. Test it in *staging* first.
+**File Security:**
+* Disable file editor in WordPress admin
+* Optionally disable all file modifications (blocks updates - use with caution)
 
-**Privacy**: the plugin does not send data to external services or create new tables. It only uses transients to count failed login attempts.
+**XML-RPC Protection:**
+* Disable XML-RPC completely (enabled by default)
+* Remove pingback methods
+* Disable self-pingbacks
+
+**User Enumeration Protection:**
+* Block `/?author=N` queries (returns 404)
+* Secure REST API user endpoints (require authentication)
+* Remove users from XML sitemaps
+* Prevent canonical redirects that expose usernames
+
+**Login Security:**
+* Generic error messages (no username/password hints)
+* IP-based rate limiting with configurable thresholds
+* Security event logging (last 100 events)
+* Automatic blocking after failed attempts
+
+**Security Headers:**
+* `X-Frame-Options: SAMEORIGIN` (clickjacking protection)
+* `X-Content-Type-Options: nosniff` (MIME sniffing protection)
+* `Referrer-Policy: strict-origin-when-cross-origin`
+* `Permissions-Policy` (restricts geolocation, microphone, camera)
+* Optional HSTS (HTTP Strict Transport Security) for HTTPS sites
+
+**Additional Hardening:**
+* Hide WordPress version
+* Clean up `wp_head` output
+* Remove unnecessary meta tags and links
+* Security event logging system
+
+> ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
+
+**Privacy:** This plugin does not send data to external services, does not create custom database tables, and only uses WordPress transients for temporary login attempt tracking.
 
 == Installation ==
 
-1. Go to **Plugins > Add New Plugin**.
-2. Search for **Security Hardener**.
-3. Install and activate the **Security Hardener** plugin.
+= Automatic Installation =
+
+1. Go to **Plugins > Add New Plugin**
+2. Search for **Security Hardener**
+3. Click **Install Now** and then **Activate**
+4. Configure settings at **Settings > Security Hardener**
 
 == Frequently Asked Questions ==
 
-= Does restricting the REST API “block everything”? =
+= What are the default settings? =
 
-No. By default it allows the **index** and the **oEmbed** namespace for basic compatibility. The rest requires an authenticated user. If you need additional public routes, do not enable the restriction or create specific solutions in your theme/plugin (with their `permission_callback`).
+By default, the plugin enables:
+* File editor disabled
+* XML-RPC disabled
+* User enumeration blocking
+* Generic login errors
+* Login rate limiting (5 attempts per 15 minutes)
+* Security headers
+* WordPress version hiding
+* Clean wp_head output
+* Security event logging
 
-= I use a CDN or proxy. What about the IP? =
+HSTS is disabled by default and should only be enabled if your entire site uses HTTPS.
 
-By default, rate limiting takes the IP from `REMOTE_ADDR`. If you use a trusted proxy (CDN/load balancer), define in `wp-config.php`:
-`define('WPH_TRUST_PROXY', true);`
-With that, the plugin will try to use `HTTP_CF_CONNECTING_IP` or `X-Forwarded-For` (first element), validating the IP.
+= Does this plugin slow down my site? =
 
-= Which headers does it add exactly? =
+No. The plugin uses lightweight WordPress hooks and native functions. Security headers add negligible overhead, and rate limiting only checks transients during login attempts.
 
-`X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: geolocation=(), microphone=(), camera=()`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`, and optionally `Strict-Transport-Security` and `Content-Security-Policy` (with nonce).
+= I use a CDN or proxy (Cloudflare, etc.). How do I get the correct IP? =
 
-= Does the plugin clean up its data upon uninstall? =
+By default, rate limiting uses `REMOTE_ADDR`. If behind a trusted proxy, add this to `wp-config.php`:
 
-Yes. `uninstall.php` deletes the main option and the rate-limit transients.
+`define('WPSH_TRUSTED_PROXIES', array(
+    '173.245.48.0',  // Example: Cloudflare IP range
+    // Add your proxy IPs here
+));`
+
+The plugin will then check `HTTP_CF_CONNECTING_IP` (Cloudflare) or `HTTP_X_FORWARDED_FOR` headers.
+
+= What headers does this plugin add? =
+
+When security headers are enabled:
+* `X-Frame-Options: SAMEORIGIN`
+* `X-Content-Type-Options: nosniff`
+* `Referrer-Policy: strict-origin-when-cross-origin`
+* `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+
+When HSTS is enabled (HTTPS only):
+* `Strict-Transport-Security: max-age=31536000; includeSubDomains` (configurable)
+
+= Does the plugin work with page caching? =
+
+Yes. Security headers are sent at the PHP level before caching. However, if you use aggressive server-level caching, you may need to configure your cache to allow these headers through.
+
+= Can I use this with other security plugins? =
+
+Yes, but be careful of conflicts. If another plugin also:
+* Sends security headers, you may get duplicates (usually harmless)
+* Blocks user enumeration, one should be disabled
+* Has login rate limiting, choose one to avoid confusion
+
+This plugin is designed to be lightweight and focused on core WordPress hardening.
+
+= What happens to my data when I uninstall? =
+
+When you **uninstall** (not just deactivate) the plugin:
+* All plugin settings are deleted
+* All security logs are deleted
+* All login rate limiting transients are cleared
+* Your WordPress installation is returned to its default state
+
+**Note:** Deactivating the plugin preserves all settings.
+
+= Does this block the WordPress REST API? =
+
+No. The plugin only secures user-related endpoints by requiring authentication. All other REST API functionality works normally. Public endpoints like oEmbed continue to work.
+
+= I'm locked out after too many failed attempts. What do I do? =
+
+Failed login blocks expire automatically based on your configured window (default: 15 minutes). Wait for the block period to expire, or:
+
+1. Access your database (phpMyAdmin, etc.)
+2. Search for options with `_transient_wpsh_login_` in the name
+3. Delete those transient options
+4. Try logging in again
+
+= How do I know if the plugin is working? =
+
+1. Check **Settings > Security Hardener** for active features
+2. Review the "Recent Security Events" log
+3. Use browser dev tools to inspect HTTP headers
+4. Try accessing `/?author=1` (should return 404 if blocking is enabled)
+5. Test failed login attempts to verify rate limiting
+
+= Does this plugin require HTTPS? =
+
+Not required, but **strongly recommended**. HSTS features require HTTPS. For maximum security, your entire site should use HTTPS with a valid SSL certificate.
+
+= Is this plugin compatible with multisite? =
+
+The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
 
-= [0.3] - 2025-10-20 =
-* Some corrections.
+= 0.5 - 2026-02-09 =
+* Complete rewrite following WordPress hardening best practices
+* Increased minimum PHP requirement to 8.0 (PHP 7.4 is end-of-life)
+* Added: Security event logging system (last 100 events)
+* Added: File permission checking with admin notices
+* Improved: User enumeration blocking (now also blocks REST endpoints and sitemaps)
+* Improved: Rate limiting algorithm (more reliable, fewer race conditions)
+* Improved: IP detection with proper proxy support via `WPSH_TRUSTED_PROXIES` constant
+* Improved: Admin interface with better organization and descriptions
+* Improved: Code quality following WordPress Coding Standards
+* Removed: CSP (Content Security Policy) - requires per-site customization
+* Removed: REST API restriction option - too broad, better handled per-case
+* Fixed: All security vulnerabilities from previous versions
+* Fixed: Proper sanitization and escaping throughout
 
-= [0.2] - 2025-10-13 =
-* Some corrections.
+= 0.3 - 2025-10-20 =
+* Some corrections
 
-= [0.1] - 2025-10-04 =
-* Initial release.
+= 0.2 - 2025-10-13 =
+* Some corrections
+
+= 0.1 - 2025-10-04 =
+* Initial release
