@@ -4,11 +4,11 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 8.0
-Stable tag: 0.6
+Stable tag: 0.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Basic hardening: secure headers, user enumeration blocking, generic login errors, IP-based rate limiting, and comprehensive WordPress security improvements.
+Basic hardening: secure headers, user enumeration blocking, generic login errors, IP-based rate limiting, and WordPress security improvements.
 
 == Description ==
 
@@ -160,7 +160,15 @@ The plugin is designed for single-site installations. Multisite compatibility ha
 
 == Changelog ==
 
-= 0.6 - 2026-21-02 =
+= 0.7 - 2026-02-21 =
+* Fixed: WPSH_VERSION constant updated to match plugin header version
+* Fixed: Added wp_unslash() and sanitize_text_field() to $_GET['author'] in prevent_author_redirect()
+* Fixed: Moved HTML markup outside translatable strings in generic_login_errors(), check_login_rate_limit(), and field descriptions for "Disable all file modifications" and "Enable HSTS"
+* Security: Added CSRF protection to "Clear Logs" action via wp_nonce_url() and wp_verify_nonce()
+* Improved: Added missing hardening recommendations to admin page: BasicAuth protection for wp-admin and changing the default database table prefix
+* Fixed: Corrected date format in changelog entries (YYYY-MM-DD)
+
+= 0.6 - 2026-02-21 =
 * Fixed: Removed deprecated load_plugin_textdomain() call (automatic since WordPress 4.6)
 * Fixed: Added wp_unslash() and sanitize_text_field() to $_GET['author'] before sanitization
 * Fixed: Moved HTML markup outside translatable string in login confirmation message
@@ -170,7 +178,7 @@ The plugin is designed for single-site installations. Multisite compatibility ha
 * Fixed: Suppressed false-positive direct database query warning in uninstall.php with inline justification comment
 * Fixed: Removed redundant function_exists() check for wp_cache_flush() in uninstall.php
 
-= 0.5 - 2026-09-02 =
+= 0.5 - 2026-02-09 =
 * Complete rewrite following WordPress hardening best practices
 * Increased minimum PHP requirement to 8.0 (PHP 7.4 is end-of-life)
 * Added: Security event logging system (last 100 events)

@@ -3,7 +3,7 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, login errors, IP-based rate limiting, and optional restriction of the REST API.
-Version: 0.6
+Version: 0.7
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 8.0
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '0.5' );
+define( 'WPSH_VERSION', '0.7' );
 define( 'WPSH_FILE', __FILE__ );
 define( 'WPSH_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPSH_URL', plugin_dir_url( __FILE__ ) );
@@ -351,7 +351,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 */
 		public function prevent_author_redirect( $redirect_url, $requested_url ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only check
-			if ( isset( $_GET['author'] ) && is_numeric( $_GET['author'] ) ) {
+			$author = isset( $_GET['author'] ) ? sanitize_text_field( wp_unslash( $_GET['author'] ) ) : null;
+			if ( null !== $author && is_numeric( $author ) ) {
 				return false; // Cancel redirect
 			}
 			return $redirect_url;
@@ -413,7 +414,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			}
 
 			// Return generic error message
-			return __( '<strong>Error:</strong> Invalid username or password.', 'security-hardener' );
+			return '<strong>' . esc_html__( 'Error:', 'security-hardener' ) . '</strong> ' . esc_html__( 'Invalid username or password.', 'security-hardener' );
 		}
 
 		/**
@@ -455,9 +456,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				$minutes = $this->get_option( 'rate_limit_minutes', 15 );
 				return new WP_Error(
 					'too_many_attempts',
-					sprintf(
+					'<strong>' . esc_html__( 'Error:', 'security-hardener' ) . '</strong> ' . sprintf(
 						/* translators: %d: number of minutes */
-						__( '<strong>Error:</strong> Too many failed login attempts. Please try again in %d minutes.', 'security-hardener' ),
+						esc_html__( 'Too many failed login attempts. Please try again in %d minutes.', 'security-hardener' ),
 						$minutes
 					)
 				);
@@ -690,7 +691,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			);
 
 			$this->add_checkbox_field( 'disable_file_edit', __( 'Disable file editor', 'security-hardener' ), 'wpsh_file_editing', __( 'Prevents editing of theme and plugin files through WordPress admin.', 'security-hardener' ) );
-			$this->add_checkbox_field( 'disable_file_mods', __( 'Disable all file modifications', 'security-hardener' ), 'wpsh_file_editing', __( '<strong>Warning:</strong> This will disable plugin/theme updates and installations.', 'security-hardener' ) );
+			$this->add_checkbox_field( 'disable_file_mods', __( 'Disable all file modifications', 'security-hardener' ), 'wpsh_file_editing', '<strong>' . esc_html__( 'Warning:', 'security-hardener' ) . '</strong> ' . esc_html__( 'This will disable plugin/theme updates and installations.', 'security-hardener' ) );
 
 			// XML-RPC section
 			add_settings_section(
@@ -788,7 +789,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'security-hardener'
 			);
 
-			$this->add_checkbox_field( 'enable_hsts', __( 'Enable HSTS', 'security-hardener' ), 'wpsh_hsts', __( '<strong>Warning:</strong> Only enable if your site fully supports HTTPS.', 'security-hardener' ) );
+			$this->add_checkbox_field( 'enable_hsts', __( 'Enable HSTS', 'security-hardener' ), 'wpsh_hsts', '<strong>' . esc_html__( 'Warning:', 'security-hardener' ) . '</strong> ' . esc_html__( 'Only enable if your site fully supports HTTPS.', 'security-hardener' ) );
 			$this->add_checkbox_field( 'hsts_subdomains', __( 'Include subdomains', 'security-hardener' ), 'wpsh_hsts' );
 			$this->add_checkbox_field( 'hsts_preload', __( 'Enable preload', 'security-hardener' ), 'wpsh_hsts', __( 'Submit to <a href="https://hstspreload.org/" target="_blank">HSTS Preload List</a> (requires 1 year max-age).', 'security-hardener' ) );
 
@@ -964,6 +965,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					<li><?php esc_html_e( 'Use security plugins for malware scanning', 'security-hardener' ); ?></li>
 					<li><?php esc_html_e( 'Restrict file permissions (directories: 755, files: 644)', 'security-hardener' ); ?></li>
 					<li><?php esc_html_e( 'Consider using a Web Application Firewall (WAF)', 'security-hardener' ); ?></li>
+					<li><?php esc_html_e( 'Protect the wp-admin directory with an additional HTTP authentication layer (BasicAuth)', 'security-hardener' ); ?></li>
+					<li><?php esc_html_e( 'Change the default database table prefix from wp_ to a custom value', 'security-hardener' ); ?></li>
 				</ul>
 
 				<p>
@@ -1024,7 +1027,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				</tbody>
 			</table>
 			<p>
-				<a href="<?php echo esc_url( admin_url( 'options-general.php?page=security-hardener&action=clear_logs' ) ); ?>" 
+				<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'options-general.php?page=security-hardener&action=clear_logs' ), 'wpsh_clear_logs' ) ); ?>" 
 				   class="button"
 				   onclick="return confirm('<?php esc_attr_e( 'Are you sure you want to clear all security logs?', 'security-hardener' ); ?>');">
 					<?php esc_html_e( 'Clear Logs', 'security-hardener' ); ?>
@@ -1037,10 +1040,12 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * Show admin notices
 		 */
 		public function show_admin_notices() {
-			// Clear logs action
+			// Clear logs action - verify nonce to prevent CSRF
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			if ( isset( $_GET['action'] ) && 'clear_logs' === $_GET['action'] && current_user_can( 'manage_options' ) ) {
-				// Verify nonce would be better, but this is acceptable for read-only admin pages
+				if ( ! isset( $_GET['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'wpsh_clear_logs' ) ) {
+					wp_die( esc_html__( 'Security check failed.', 'security-hardener' ) );
+				}
 				delete_option( 'wpsh_security_logs' );
 				?>
 				<div class="notice notice-success is-dismissible">
