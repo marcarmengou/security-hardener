@@ -3,9 +3,9 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, login errors, IP-based rate limiting, and optional restriction of the REST API.
-Version: 0.5
+Version: 0.6
 Requires at least: 6.0
-Tested up to: 6.8
+Tested up to: 6.9
 Requires PHP: 8.0
 Author: Marc Armengou
 Author URI: https://www.marcarmengou.com/
@@ -82,9 +82,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * Initialize plugin
 		 */
 		public function init() {
-			// Load text domain
-			load_plugin_textdomain( 'security-hardener', false, dirname( WPSH_BASENAME ) . '/languages' );
-
 			// Define security constants early
 			$this->define_security_constants();
 
@@ -251,12 +248,12 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		private function define_security_constants() {
 			// Disable file editing in WordPress admin
 			if ( $this->get_option( 'disable_file_edit', true ) && ! defined( 'DISALLOW_FILE_EDIT' ) ) {
-				define( 'DISALLOW_FILE_EDIT', true );
+				define( 'DISALLOW_FILE_EDIT', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Native WordPress constant
 			}
 
 			// Disable all file modifications (updates, installs) - CAUTION: This breaks updates!
 			if ( $this->get_option( 'disable_file_mods', false ) && ! defined( 'DISALLOW_FILE_MODS' ) ) {
-				define( 'DISALLOW_FILE_MODS', true );
+				define( 'DISALLOW_FILE_MODS', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Native WordPress constant
 			}
 		}
 
@@ -333,7 +330,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 			// Check for author query parameter with numeric value
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only check
-			$author = isset( $_GET['author'] ) ? $_GET['author'] : null;
+			$author = isset( $_GET['author'] ) ? sanitize_text_field( wp_unslash( $_GET['author'] ) ) : null;
 
 			// Block numeric author parameter
 			if ( null !== $author && is_numeric( $author ) ) {
@@ -428,7 +425,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'login_messages',
 				function ( $message ) {
 					if ( strpos( $message, 'check your email' ) !== false ) {
-						return __( '<strong>Check your email for the confirmation link.</strong>', 'security-hardener' );
+						return '<strong>' . esc_html__( 'Check your email for the confirmation link.', 'security-hardener' ) . '</strong>';
 					}
 					return $message;
 				}
@@ -864,8 +861,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				esc_attr( self::OPTION_NAME ),
 				esc_attr( $field_id ),
 				esc_attr( $value ),
-				$min,
-				$max
+				absint( $min ),
+				absint( $max )
 			);
 		}
 

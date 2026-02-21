@@ -4,7 +4,7 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 8.0
-Stable tag: 0.5
+Stable tag: 0.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -160,7 +160,17 @@ The plugin is designed for single-site installations. Multisite compatibility ha
 
 == Changelog ==
 
-= 0.5 - 2026-02-09 =
+= 0.6 - 2026-21-02 =
+* Fixed: Removed deprecated load_plugin_textdomain() call (automatic since WordPress 4.6)
+* Fixed: Added wp_unslash() and sanitize_text_field() to $_GET['author'] before sanitization
+* Fixed: Moved HTML markup outside translatable string in login confirmation message
+* Fixed: Escaped $min and $max output in render_number_field() using absint()
+* Fixed: Added phpcs:ignore for native WordPress constants DISALLOW_FILE_EDIT and DISALLOW_FILE_MODS
+* Fixed: Removed error_log() debug call from uninstall.php
+* Fixed: Suppressed false-positive direct database query warning in uninstall.php with inline justification comment
+* Fixed: Removed redundant function_exists() check for wp_cache_flush() in uninstall.php
+
+= 0.5 - 2026-09-02 =
 * Complete rewrite following WordPress hardening best practices
 * Increased minimum PHP requirement to 8.0 (PHP 7.4 is end-of-life)
 * Added: Security event logging system (last 100 events)
