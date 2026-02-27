@@ -2,8 +2,8 @@
 /*
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
-Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, login errors, IP-based rate limiting, and optional restriction of the REST API.
-Version: 0.7
+Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, generic login errors, and IP-based rate limiting.
+Version: 0.8
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 8.0
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '0.7' );
+define( 'WPSH_VERSION', '0.8' );
 define( 'WPSH_FILE', __FILE__ );
 define( 'WPSH_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPSH_URL', plugin_dir_url( __FILE__ ) );
@@ -70,6 +70,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// Load options
 			$this->options = $this->get_options();
 
+			// Define security constants as early as possible
+			$this->define_security_constants();
+
 			// Activation/Deactivation hooks
 			register_activation_hook( WPSH_FILE, array( $this, 'activate' ) );
 			register_deactivation_hook( WPSH_FILE, array( $this, 'deactivate' ) );
@@ -82,9 +85,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * Initialize plugin
 		 */
 		public function init() {
-			// Define security constants early
-			$this->define_security_constants();
-
 			// Security headers
 			add_action( 'send_headers', array( $this, 'send_security_headers' ) );
 
@@ -456,10 +456,12 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				$minutes = $this->get_option( 'rate_limit_minutes', 15 );
 				return new WP_Error(
 					'too_many_attempts',
-					'<strong>' . esc_html__( 'Error:', 'security-hardener' ) . '</strong> ' . sprintf(
-						/* translators: %d: number of minutes */
-						esc_html__( 'Too many failed login attempts. Please try again in %d minutes.', 'security-hardener' ),
-						$minutes
+					wp_kses_post(
+						'<strong>' . esc_html__( 'Error:', 'security-hardener' ) . '</strong> ' . sprintf(
+							/* translators: %d: number of minutes */
+							esc_html__( 'Too many failed login attempts. Please try again in %d minutes.', 'security-hardener' ),
+							$minutes
+						)
 					)
 				);
 			}
@@ -637,12 +639,15 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// Get existing logs
 			$logs = get_option( 'wpsh_security_logs', array() );
 
+			// Resolve IP once to avoid calling get_client_ip() twice
+			$ip = $this->get_client_ip();
+
 			// Add new log entry
 			$logs[] = array(
 				'timestamp'  => current_time( 'mysql' ),
 				'type'       => $event_type,
 				'message'    => $message,
-				'ip'         => $this->get_client_ip(),
+				'ip'         => $ip,
 				'user_agent' => isset( $_SERVER['HTTP_USER_AGENT'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ) : '',
 			);
 
@@ -651,7 +656,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				$logs = array_slice( $logs, -100 );
 			}
 
-			update_option( 'wpsh_security_logs', $logs );
+			// autoload=false: logs are only needed on the settings page, not on every request
+			update_option( 'wpsh_security_logs', $logs, false );
 		}
 
 		/**
@@ -830,7 +836,12 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Render checkbox field
 		 *
-		 * @param array $args Field arguments.
+		 * @param array $args {
+		 *     Field arguments.
+		 *
+		 *     @type string $field_id    Option key in the stored options array.
+		 *     @type string $description Optional description shown beside the checkbox.
+		 * }
 		 */
 		public function render_checkbox_field( $args ) {
 			$field_id = $args['field_id'];
@@ -1041,8 +1052,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 */
 		public function show_admin_notices() {
 			// Clear logs action - verify nonce to prevent CSRF
-			// phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			if ( isset( $_GET['action'] ) && 'clear_logs' === $_GET['action'] && current_user_can( 'manage_options' ) ) {
+			if ( isset( $_GET['action'] ) && 'clear_logs' === $_GET['action'] && current_user_can( 'manage_options' ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce is verified on the next line
 				if ( ! isset( $_GET['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'wpsh_clear_logs' ) ) {
 					wp_die( esc_html__( 'Security check failed.', 'security-hardener' ) );
 				}
@@ -1152,8 +1162,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		public function add_settings_link( $links ) {
 			$settings_link = sprintf(
 				'<a href="%s">%s</a>',
-				admin_url( 'options-general.php?page=security-hardener' ),
-				__( 'Settings', 'security-hardener' )
+				esc_url( admin_url( 'options-general.php?page=security-hardener' ) ),
+				esc_html__( 'Settings', 'security-hardener' )
 			);
 			array_unshift( $links, $settings_link );
 			return $links;

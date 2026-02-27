@@ -4,7 +4,7 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 8.0
-Stable tag: 0.7
+Stable tag: 0.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,7 +52,7 @@ Basic hardening: secure headers, user enumeration blocking, generic login errors
 
 > ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
 
-**Privacy:** This plugin does not send data to external services, does not create custom database tables, and only uses WordPress transients for temporary login attempt tracking.
+**Privacy:** This plugin does not send data to external services and does not create custom database tables. It stores plugin settings and a security event log in the WordPress options table, and uses transients for temporary login attempt tracking. All data is deleted on uninstall.
 
 == Installation ==
 
@@ -159,6 +159,17 @@ Not required, but **strongly recommended**. HSTS features require HTTPS. For max
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 0.8 - 2026-02-26 =
+* Improved: Moved define_security_constants() from plugins_loaded hook to the constructor, ensuring DISALLOW_FILE_EDIT and DISALLOW_FILE_MODS are defined as early as possible in the WordPress lifecycle
+* Improved: Expanded @param docblock for render_checkbox_field() to document all $args keys
+* Added: WordPress Playground blueprint (assets/blueprints/blueprint.json) enabling live plugin preview directly from the WordPress.org plugin directory
+* Fixed: Plugin header description updated to remove REST API restriction option removed in 0.5
+* Fixed: Removed stale phpcs:ignore comment in show_admin_notices() — nonce verification is now correctly documented inline
+* Fixed: Wrapped login block error message with wp_kses_post() for consistent output escaping
+* Fixed: Added esc_url() and esc_html__() to add_settings_link() sprintf output
+* Fixed: Removed redundant get_client_ip() call in log_security_event() — IP resolved once per event
+* Fixed: Added autoload=false to wpsh_security_logs option — logs are only needed on the settings page, not loaded on every request
 
 = 0.7 - 2026-02-21 =
 * Fixed: WPSH_VERSION constant updated to match plugin header version
