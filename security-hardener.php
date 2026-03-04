@@ -3,10 +3,10 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, generic login errors, and IP-based rate limiting.
-Version: 0.8
-Requires at least: 6.0
+Version: 0.9
+Requires at least: 6.9
 Tested up to: 6.9
-Requires PHP: 8.0
+Requires PHP: 8.3
 Author: Marc Armengou
 Author URI: https://www.marcarmengou.com/
 Text Domain: security-hardener
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '0.8' );
+define( 'WPSH_VERSION', '0.9' );
 define( 'WPSH_FILE', __FILE__ );
 define( 'WPSH_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPSH_URL', plugin_dir_url( __FILE__ ) );
@@ -42,21 +42,21 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @var WPHN_Hardener|null
 		 */
-		private static $instance = null;
+		private static ?self $instance = null;
 
 		/**
 		 * Plugin options
 		 *
-		 * @var array
+		 * @var array<string, mixed>
 		 */
-		private $options = array();
+		private array $options = [];
 
 		/**
 		 * Get singleton instance
 		 *
 		 * @return WPHN_Hardener
 		 */
-		public static function get_instance() {
+		public static function get_instance(): static {
 			if ( null === self::$instance ) {
 				self::$instance = new self();
 			}
@@ -84,7 +84,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Initialize plugin
 		 */
-		public function init() {
+		public function init(): void {
 			// Security headers
 			add_action( 'send_headers', array( $this, 'send_security_headers' ) );
 
@@ -148,7 +148,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Plugin activation
 		 */
-		public function activate() {
+		public function activate(): void {
 			// Set default options only if they don't exist
 			if ( false === get_option( self::OPTION_NAME ) ) {
 				$defaults = $this->get_default_options();
@@ -162,7 +162,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Plugin deactivation
 		 */
-		public function deactivate() {
+		public function deactivate(): void {
 			// Log deactivation
 			$this->log_security_event( 'plugin_deactivated', 'Security Hardener plugin deactivated' );
 		}
@@ -172,49 +172,50 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @return array
 		 */
-		private function get_default_options() {
-			return array(
+		private function get_default_options(): array {
+			return [
 				// File editing
-				'disable_file_edit'    => 1,
-				'disable_file_mods'    => 0, // Disabled by default as it breaks updates
+				'disable_file_edit'        => 1,
+				'disable_file_mods'        => 0, // Disabled by default as it breaks updates
 
 				// XML-RPC
-				'disable_xmlrpc'       => 1,
+				'disable_xmlrpc'           => 1,
 
 				// Version hiding
-				'hide_wp_version'      => 1,
+				'hide_wp_version'          => 1,
 
 				// User enumeration
-				'block_user_enum'      => 1,
+				'block_user_enum'          => 1,
 
 				// Login security
-				'secure_login'         => 1,
-				'rate_limit_login'     => 1,
-				'rate_limit_attempts'  => 5,
-				'rate_limit_minutes'   => 15,
+				'secure_login'             => 1,
+				'rate_limit_login'         => 1,
+				'rate_limit_attempts'      => 5,
+				'rate_limit_minutes'       => 15,
 
 				// Pingbacks
-				'disable_pingbacks'    => 1,
+				'disable_pingbacks'        => 1,
 
 				// Clean wp_head
-				'clean_head'           => 1,
+				'clean_head'               => 1,
 
 				// Security headers
-				'enable_headers'       => 1,
-				'header_x_frame'       => 1,
-				'header_x_content'     => 1,
-				'header_referrer'      => 1,
-				'header_permissions'   => 1,
+				'enable_headers'           => 1,
+				'header_x_frame'           => 1,
+				'header_x_content'         => 1,
+				'header_referrer'          => 1,
+				'header_permissions'       => 1,
 
 				// HTTPS
-				'enable_hsts'          => 0, // Off by default - requires HTTPS
-				'hsts_max_age'         => 31536000,
-				'hsts_subdomains'      => 1,
-				'hsts_preload'         => 0,
+				'enable_hsts'              => 0, // Off by default - requires HTTPS
+				'hsts_max_age'             => 31536000,
+				'hsts_subdomains'          => 1,
+				'hsts_preload'             => 0,
 
 				// Advanced
-				'log_security_events'  => 1,
-			);
+				'log_security_events'      => 1,
+				'delete_data_on_uninstall' => 0,
+			];
 		}
 
 		/**
@@ -222,7 +223,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @return array
 		 */
-		private function get_options() {
+		private function get_options(): array {
 			$options  = get_option( self::OPTION_NAME, array() );
 			$defaults = $this->get_default_options();
 			return wp_parse_args( $options, $defaults );
@@ -235,7 +236,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param mixed  $default Default value.
 		 * @return mixed
 		 */
-		private function get_option( $key, $default = null ) {
+		private function get_option( $key, $default = null ): mixed {
 			if ( isset( $this->options[ $key ] ) ) {
 				return $this->options[ $key ];
 			}
@@ -245,7 +246,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Define security constants based on plugin settings
 		 */
-		private function define_security_constants() {
+		private function define_security_constants(): void {
 			// Disable file editing in WordPress admin
 			if ( $this->get_option( 'disable_file_edit', true ) && ! defined( 'DISALLOW_FILE_EDIT' ) ) {
 				define( 'DISALLOW_FILE_EDIT', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Native WordPress constant
@@ -260,7 +261,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Send security headers
 		 */
-		public function send_security_headers() {
+		public function send_security_headers(): void {
 			if ( ! $this->get_option( 'enable_headers', true ) ) {
 				return;
 			}
@@ -313,7 +314,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $methods XML-RPC methods.
 		 * @return array
 		 */
-		public function remove_xmlrpc_pingback( $methods ) {
+		public function remove_xmlrpc_pingback( $methods ): array {
 			unset( $methods['pingback.ping'] );
 			unset( $methods['pingback.extensions.getPingbacks'] );
 			return $methods;
@@ -322,7 +323,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Prevent user enumeration via ?author=N
 		 */
-		public function prevent_user_enumeration() {
+		public function prevent_user_enumeration(): void {
 			// Don't interfere in admin
 			if ( is_admin() ) {
 				return;
@@ -349,7 +350,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string $requested_url Requested URL.
 		 * @return string|false
 		 */
-		public function prevent_author_redirect( $redirect_url, $requested_url ) {
+		public function prevent_author_redirect( $redirect_url, $requested_url ): string|false {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only check
 			$author = isset( $_GET['author'] ) ? sanitize_text_field( wp_unslash( $_GET['author'] ) ) : null;
 			if ( null !== $author && is_numeric( $author ) ) {
@@ -364,7 +365,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $endpoints REST endpoints.
 		 * @return array
 		 */
-		public function secure_user_endpoints( $endpoints ) {
+		public function secure_user_endpoints( $endpoints ): array {
 			if ( ! is_array( $endpoints ) ) {
 				return $endpoints;
 			}
@@ -397,7 +398,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string                $name Provider name.
 		 * @return WP_Sitemaps_Provider|false
 		 */
-		public function remove_users_sitemap( $provider, $name ) {
+		public function remove_users_sitemap( $provider, $name ): \WP_Sitemaps_Provider|false {
 			return ( 'users' === $name ) ? false : $provider;
 		}
 
@@ -407,7 +408,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string $error Error message.
 		 * @return string
 		 */
-		public function generic_login_errors( $error ) {
+		public function generic_login_errors( $error ): string {
 			// Don't change the error if it's empty
 			if ( empty( $error ) ) {
 				return $error;
@@ -420,7 +421,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Remove login hints from login page
 		 */
-		public function remove_login_hints() {
+		public function remove_login_hints(): void {
 			// Remove "lost password" text that reveals if username exists
 			add_filter(
 				'login_messages',
@@ -441,7 +442,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string                 $password Password.
 		 * @return WP_User|WP_Error
 		 */
-		public function check_login_rate_limit( $user, $username, $password ) {
+		public function check_login_rate_limit( $user, $username, $password ): \WP_User|\WP_Error|null {
 			// Skip if credentials are empty
 			if ( empty( $username ) || empty( $password ) ) {
 				return $user;
@@ -474,7 +475,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @param string $username Username used in failed attempt.
 		 */
-		public function log_failed_login( $username ) {
+		public function log_failed_login( $username ): void {
 			$ip           = $this->get_client_ip();
 			$attempts_key = 'wpsh_login_attempts_' . md5( $ip );
 			$blocked_key  = 'wpsh_login_blocked_' . md5( $ip );
@@ -521,7 +522,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string  $user_login Username.
 		 * @param WP_User $user User object.
 		 */
-		public function clear_login_attempts( $user_login, $user ) {
+		public function clear_login_attempts( $user_login, $user ): void {
 			$ip           = $this->get_client_ip();
 			$attempts_key = 'wpsh_login_attempts_' . md5( $ip );
 			$blocked_key  = 'wpsh_login_blocked_' . md5( $ip );
@@ -535,7 +536,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @return string
 		 */
-		private function get_client_ip() {
+		private function get_client_ip(): string {
 			$ip = '0.0.0.0';
 
 			// Check for trusted proxy header (only if explicitly configured)
@@ -579,7 +580,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @param array $links Links to ping.
 		 */
-		public function disable_self_pingbacks( &$links ) {
+		public function disable_self_pingbacks( &$links ): void {
 			$home = get_option( 'home' );
 			foreach ( $links as $l => $link ) {
 				if ( 0 === strpos( $link, $home ) ) {
@@ -594,7 +595,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $headers HTTP headers.
 		 * @return array
 		 */
-		public function remove_x_pingback( $headers ) {
+		public function remove_x_pingback( $headers ): array {
 			unset( $headers['X-Pingback'] );
 			return $headers;
 		}
@@ -602,7 +603,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Clean up wp_head
 		 */
-		private function cleanup_wp_head() {
+		private function cleanup_wp_head(): void {
 			// Remove RSD link
 			remove_action( 'wp_head', 'rsd_link' );
 
@@ -631,7 +632,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string $event_type Event type.
 		 * @param string $message Event message.
 		 */
-		private function log_security_event( $event_type, $message ) {
+		private function log_security_event( $event_type, $message ): void {
 			if ( ! $this->get_option( 'log_security_events', true ) ) {
 				return;
 			}
@@ -663,7 +664,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Add admin menu
 		 */
-		public function add_admin_menu() {
+		public function add_admin_menu(): void {
 			add_options_page(
 				__( 'Security Hardener', 'security-hardener' ),
 				__( 'Security Hardener', 'security-hardener' ),
@@ -676,7 +677,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Register settings
 		 */
-		public function register_settings() {
+		public function register_settings(): void {
 			register_setting(
 				'wpsh_settings',
 				self::OPTION_NAME,
@@ -809,6 +810,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 			$this->add_checkbox_field( 'clean_head', __( 'Clean wp_head', 'security-hardener' ), 'wpsh_other', __( 'Remove unnecessary items from &lt;head&gt; section.', 'security-hardener' ) );
 			$this->add_checkbox_field( 'log_security_events', __( 'Log security events', 'security-hardener' ), 'wpsh_other', __( 'Keep a log of security events (last 100 entries).', 'security-hardener' ) );
+			$this->add_checkbox_field( 'delete_data_on_uninstall', __( 'Delete all data on uninstall', 'security-hardener' ), 'wpsh_other', '<strong>' . esc_html__( 'Warning:', 'security-hardener' ) . '</strong> ' . esc_html__( 'When enabled, all plugin settings and security logs will be permanently deleted when the plugin is uninstalled. Disabled by default to preserve data.', 'security-hardener' ) );
 		}
 
 		/**
@@ -819,7 +821,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string $section Section ID.
 		 * @param string $description Optional description.
 		 */
-		private function add_checkbox_field( $field_id, $label, $section, $description = '' ) {
+		private function add_checkbox_field( $field_id, $label, $section, $description = '' ): void {
 			add_settings_field(
 				$field_id,
 				$label,
@@ -843,7 +845,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *     @type string $description Optional description shown beside the checkbox.
 		 * }
 		 */
-		public function render_checkbox_field( $args ) {
+		public function render_checkbox_field( $args ): void {
 			$field_id = $args['field_id'];
 			$value    = $this->get_option( $field_id, 0 );
 			$checked  = checked( 1, $value, false );
@@ -862,7 +864,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @param array $args Field arguments.
 		 */
-		public function render_number_field( $args ) {
+		public function render_number_field( $args ): void {
 			$field_id = $args['field_id'];
 			$value    = $this->get_option( $field_id, $args['default'] );
 			$min      = isset( $args['min'] ) ? absint( $args['min'] ) : 1;
@@ -884,15 +886,15 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $input Raw input.
 		 * @return array
 		 */
-		public function sanitize_options( $input ) {
+		public function sanitize_options( $input ): array {
 			if ( ! is_array( $input ) ) {
-				$input = array();
+				$input = [];
 			}
 
-			$sanitized = array();
+			$sanitized = [];
 
-			// Boolean fields
-			$boolean_fields = array(
+			// Boolean fields — use match to be explicit about the 1/0 cast.
+			$boolean_fields = [
 				'disable_file_edit',
 				'disable_file_mods',
 				'disable_xmlrpc',
@@ -911,10 +913,14 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'hsts_preload',
 				'clean_head',
 				'log_security_events',
-			);
+				'delete_data_on_uninstall',
+			];
 
 			foreach ( $boolean_fields as $field ) {
-				$sanitized[ $field ] = ! empty( $input[ $field ] ) ? 1 : 0;
+				$sanitized[ $field ] = match ( true ) {
+					! empty( $input[ $field ] ) => 1,
+					default                     => 0,
+				};
 			}
 
 			// Numeric fields
@@ -936,7 +942,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Render settings page
 		 */
-		public function render_settings_page() {
+		public function render_settings_page(): void {
 			if ( ! current_user_can( 'manage_options' ) ) {
 				wp_die( esc_html__( 'You do not have sufficient permissions to access this page.', 'security-hardener' ) );
 			}
@@ -996,7 +1002,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Render security logs section
 		 */
-		private function render_security_logs() {
+		private function render_security_logs(): void {
 			if ( ! $this->get_option( 'log_security_events', true ) ) {
 				return;
 			}
@@ -1050,7 +1056,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Show admin notices
 		 */
-		public function show_admin_notices() {
+		public function show_admin_notices(): void {
 			// Clear logs action - verify nonce to prevent CSRF
 			if ( isset( $_GET['action'] ) && 'clear_logs' === $_GET['action'] && current_user_can( 'manage_options' ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce is verified on the next line
 				if ( ! isset( $_GET['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'wpsh_clear_logs' ) ) {
@@ -1071,7 +1077,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Check file permissions and show notice
 		 */
-		private function check_file_permissions_notice() {
+		private function check_file_permissions_notice(): void {
 			// Only show on plugin settings page
 			$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 			if ( ! $screen || 'settings_page_security-hardener' !== $screen->id ) {
@@ -1159,7 +1165,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $links Plugin action links.
 		 * @return array
 		 */
-		public function add_settings_link( $links ) {
+		public function add_settings_link( $links ): array {
 			$settings_link = sprintf(
 				'<a href="%s">%s</a>',
 				esc_url( admin_url( 'options-general.php?page=security-hardener' ) ),
