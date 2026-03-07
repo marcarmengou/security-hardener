@@ -3,8 +3,8 @@ Contributors: marc4
 Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
 Tested up to: 6.9
-Requires PHP: 8.3
-Stable tag: 0.9
+Requires PHP: 8.2
+Stable tag: 1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -160,13 +160,13 @@ The plugin is designed for single-site installations. Multisite compatibility ha
 
 == Changelog ==
 
-= 0.9 - 2026-03-04 =
-* Updated: Minimum WordPress requirement raised to 6.9 (not backward compatible)
-* Updated: Minimum PHP requirement raised to 8.3 (not backward compatible)
+= 1.0 - 2026-03-05 =
+* Updated: Minimum WordPress requirement raised to 6.9
+* Updated: Minimum PHP requirement raised to 8.2
 * Improved: Applied PHP 8.3 modern syntax throughout — typed class properties, explicit return types on all methods, short array syntax, and `match` expression in `sanitize_options()`
 * Added: `delete_data_on_uninstall` option (default: disabled) — users must explicitly opt in to data deletion on uninstall; data is preserved by default
 * Fixed: `uninstall.php` no longer uses direct SQL queries; deletion is now conditional on the opt-in option and uses WordPress APIs exclusively
-* Fixed: `WPSH_VERSION` constant kept in sync with plugin header at `0.9`
+* Fixed: `WPSH_VERSION` constant kept in sync with plugin header at `1.0`
 
 = 0.8 - 2026-02-26 =
 * Improved: Moved define_security_constants() from plugins_loaded hook to the constructor, ensuring DISALLOW_FILE_EDIT and DISALLOW_FILE_MODS are defined as early as possible in the WordPress lifecycle

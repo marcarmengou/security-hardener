@@ -3,10 +3,10 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, generic login errors, and IP-based rate limiting.
-Version: 0.9
+Version: 1.0
 Requires at least: 6.9
 Tested up to: 6.9
-Requires PHP: 8.3
+Requires PHP: 8.2
 Author: Marc Armengou
 Author URI: https://www.marcarmengou.com/
 Text Domain: security-hardener
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '0.9' );
+define( 'WPSH_VERSION', '1.0' );
 define( 'WPSH_FILE', __FILE__ );
 define( 'WPSH_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPSH_URL', plugin_dir_url( __FILE__ ) );
