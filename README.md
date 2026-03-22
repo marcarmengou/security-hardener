@@ -1,6 +1,8 @@
 # Description
 
-**Security Hardener** implements the official WordPress hardening guidelines from the [WordPress Advanced Administration / Security / Hardening](https://developer.wordpress.org/advanced-administration/security/hardening/) documentation. It uses WordPress core functions and follows best practices without modifying core files.
+**Security Hardener** applies WordPress security best practices based on the [WordPress Advanced Administration / Security / Hardening](https://developer.wordpress.org/advanced-administration/security/hardening/) documentation and widely accepted hardening measures. It uses WordPress core functions and follows best practices without modifying core files.
+
+## Key Features
 
 **File Security:**
 * Disable file editor in WordPress admin
@@ -8,8 +10,12 @@
 
 **XML-RPC Protection:**
 * Disable XML-RPC completely (enabled by default)
-* Remove pingback methods
+* Remove pingback methods when XML-RPC is enabled
+
+**Pingback Protection:**
 * Disable self-pingbacks
+* Remove X-Pingback header
+* Block incoming pingbacks
 
 **User Enumeration Protection:**
 * Block `/?author=N` queries (returns 404)
@@ -28,17 +34,16 @@
 * `X-Content-Type-Options: nosniff` (MIME sniffing protection)
 * `Referrer-Policy: strict-origin-when-cross-origin`
 * `Permissions-Policy` (restricts geolocation, microphone, camera)
-* Optional HSTS (HTTP Strict Transport Security) for HTTPS sites
+* Optional HSTS (HTTP Strict Transport Security) for HTTPS sites — max-age set to 1 year
 
 **Additional Hardening:**
-* Hide WordPress version
-* Clean up `wp_head` output
-* Remove unnecessary meta tags and links
+* Hide WordPress version (meta generator tag and asset query strings)
+* Remove obsolete wp_head items (RSD, WLW manifest, shortlink, emoji scripts)
 * Security event logging system
 
 > ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
 
-**Privacy:** This plugin does not send data to external services, does not create custom database tables, and only uses WordPress transients for temporary login attempt tracking.
+**Privacy:** This plugin does not send data to external services and does not create custom database tables. It stores plugin settings and a security event log in the WordPress options table, and uses transients for temporary login attempt tracking. All data is preserved on uninstall by default and only deleted if the "Delete all data on uninstall" option is explicitly enabled.
 
 ## Resources
 WordPress Plugin Repository: [https://wordpress.org/plugins/security-hardener/](https://wordpress.org/plugins/security-hardener/)
