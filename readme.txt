@@ -4,7 +4,7 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
-Stable tag: 1.0
+Stable tag: 2.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -12,7 +12,7 @@ Basic hardening: secure headers, user enumeration blocking, generic login errors
 
 == Description ==
 
-**Security Hardener** implements the official WordPress hardening guidelines from the [WordPress Advanced Administration / Security / Hardening](https://developer.wordpress.org/advanced-administration/security/hardening/) documentation. It uses WordPress core functions and follows best practices without modifying core files.
+**Security Hardener** applies WordPress security best practices based on the [WordPress Advanced Administration / Security / Hardening](https://developer.wordpress.org/advanced-administration/security/hardening/) documentation and widely accepted hardening measures. It uses WordPress core functions and follows best practices without modifying core files.
 
 = Key Features =
 
@@ -22,8 +22,12 @@ Basic hardening: secure headers, user enumeration blocking, generic login errors
 
 **XML-RPC Protection:**
 * Disable XML-RPC completely (enabled by default)
-* Remove pingback methods
+* Remove pingback methods when XML-RPC is enabled
+
+**Pingback Protection:**
 * Disable self-pingbacks
+* Remove X-Pingback header
+* Block incoming pingbacks
 
 **User Enumeration Protection:**
 * Block `/?author=N` queries (returns 404)
@@ -42,17 +46,16 @@ Basic hardening: secure headers, user enumeration blocking, generic login errors
 * `X-Content-Type-Options: nosniff` (MIME sniffing protection)
 * `Referrer-Policy: strict-origin-when-cross-origin`
 * `Permissions-Policy` (restricts geolocation, microphone, camera)
-* Optional HSTS (HTTP Strict Transport Security) for HTTPS sites
+* Optional HSTS (HTTP Strict Transport Security) for HTTPS sites — max-age set to 1 year
 
 **Additional Hardening:**
-* Hide WordPress version
-* Clean up `wp_head` output
-* Remove unnecessary meta tags and links
+* Hide WordPress version (meta generator tag and asset query strings)
+* Remove obsolete wp_head items (RSD, WLW manifest, shortlink, emoji scripts)
 * Security event logging system
 
 > ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
 
-**Privacy:** This plugin does not send data to external services and does not create custom database tables. It stores plugin settings and a security event log in the WordPress options table, and uses transients for temporary login attempt tracking. All data is deleted on uninstall.
+**Privacy:** This plugin does not send data to external services and does not create custom database tables. It stores plugin settings and a security event log in the WordPress options table, and uses transients for temporary login attempt tracking. All data is preserved on uninstall by default and only deleted if the "Delete all data on uninstall" option is explicitly enabled.
 
 == Installation ==
 
@@ -74,7 +77,7 @@ By default, the plugin enables:
 * Generic login errors
 * Login rate limiting (5 attempts per 15 minutes)
 * Security headers
-* WordPress version hiding
+* WordPress version hiding (meta generator tag and asset query strings)
 * Clean wp_head output
 * Security event logging
 
@@ -104,7 +107,7 @@ When security headers are enabled:
 * `Permissions-Policy: geolocation=(), microphone=(), camera=()`
 
 When HSTS is enabled (HTTPS only):
-* `Strict-Transport-Security: max-age=31536000; includeSubDomains` (configurable)
+* `Strict-Transport-Security: max-age=31536000` (optionally with `includeSubDomains` if enabled)
 
 = Does the plugin work with page caching? =
 
@@ -159,6 +162,41 @@ Not required, but **strongly recommended**. HSTS features require HTTPS. For max
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 2.0.2 - 2026-03-21 =
+* Improved: Number fields now show allowed range as permanent help text (Min/Max) below the label.
+* Fixed: Lost password flow now uses lostpassword_errors filter instead of login_messages.
+* Fixed: "Clear Logs" replaced JavaScript confirm() with a proper POST form.
+* Fixed: $_POST['wpsh_action'] sanitized with sanitize_key() before comparison, following WordPress Coding Standards.
+
+= 2.0.1 - 2026-03-21 =
+* Fixed: "Block user enumeration" description now mentions canonical redirect blocking
+* Fixed: "Login rate limiting" toggle and number fields now have descriptions for consistency with all other options
+* Fixed: Removed unused WPSH_DIR and WPSH_URL constants
+* Fixed: Removed misleading inline comment about file editing in init()
+* Fixed: readme — "Disable self-pingbacks" moved from XML-RPC section to its own Pingback Protection section
+* Fixed: Unused parameters in clear_login_attempts() prefixed with underscore following WordPress Coding Standards
+* Fixed: @return docblock for get_default_options() updated to array<string, int> for accuracy
+* Fixed: Activation and deactivation log messages now pass through __() for translation
+* Fixed: remove_login_hints() no longer relies on hardcoded English string comparison
+* Fixed: strpos() replaced with str_starts_with() in disable_self_pingbacks() — consistent with PHP 8.2+ usage throughout the plugin
+* Fixed: Explicit string types added to log_security_event() method signature
+* Fixed: @param docblock of clear_login_attempts() updated to reflect renamed parameters $_user_login and $_user
+
+= 2.0.0 - 2026-03-20 =
+* Improved: Complete redesign of the settings page — responsive 3-column card grid replaces the default WordPress Settings API table layout
+* Improved: Checkboxes replaced with CSS toggles for clearer on/off state at a glance
+* Improved: "Clear Logs" button moved inline next to the section heading
+* Improved: Minimal inline CSS scoped to .wpsh-* classes — no external stylesheet enqueued
+* Removed: "Enable security headers" master toggle — each header is now controlled individually
+* Removed: Configurable HSTS max-age field — hardcoded to 31536000 seconds (1 year), the universally recommended value
+* Fixed: HSTS "Include subdomains" now defaults to disabled — users must opt in explicitly
+* Improved: "Hide WordPress version" now also strips the WordPress version from script and style asset URLs (?ver=), preventing version detection via asset URLs
+* Improved: "Hide WordPress version" moved from "User Enumeration" to "Other Settings"
+* Improved: "Clean wp_head" no longer removes feed links extra — avoids conflicts with plugins that rely on category and tag feeds
+* Improved: "Clean wp_head" no longer removes wp_generator — already covered by "Hide WordPress version"
+* Improved: All toggle descriptions updated for consistency — each option now explains what value or behaviour it applies
+* Added: New "Additional Hardening Recommendations" section in the plugin admin page and readme, including four measures from the official WordPress Hardening Guide not previously listed: rename admin account, restrict database user privileges, protect wp-config.php, and block direct access to wp-includes/
 
 = 1.0 - 2026-03-05 =
 * Updated: Minimum WordPress requirement raised to 6.9

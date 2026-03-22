@@ -3,7 +3,7 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, generic login errors, and IP-based rate limiting.
-Version: 1.0
+Version: 2.0.2
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
@@ -19,16 +19,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '1.0' );
+define( 'WPSH_VERSION', '2.0.2' );
 define( 'WPSH_FILE', __FILE__ );
-define( 'WPSH_DIR', plugin_dir_path( __FILE__ ) );
-define( 'WPSH_URL', plugin_dir_url( __FILE__ ) );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
 if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 	/**
-	 * Main plugin class implementing WordPress.org hardening guidelines
+	 * Main plugin class applying WordPress security best practices
 	 */
 	class WPHN_Hardener {
 
@@ -88,9 +86,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// Security headers
 			add_action( 'send_headers', array( $this, 'send_security_headers' ) );
 
-			// Disable file editing
-			// Already handled via constants
-
 			// XML-RPC hardening
 			if ( $this->get_option( 'disable_xmlrpc', true ) ) {
 				add_filter( 'xmlrpc_enabled', '__return_false' );
@@ -101,6 +96,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			if ( $this->get_option( 'hide_wp_version', true ) ) {
 				add_filter( 'the_generator', '__return_empty_string' );
 				remove_action( 'wp_head', 'wp_generator' );
+				add_filter( 'script_loader_src', array( $this, 'remove_wp_version_from_assets' ) );
+				add_filter( 'style_loader_src', array( $this, 'remove_wp_version_from_assets' ) );
 			}
 
 			// User enumeration protection
@@ -114,7 +111,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// Login security
 			if ( $this->get_option( 'secure_login', true ) ) {
 				add_filter( 'login_errors', array( $this, 'generic_login_errors' ) );
-				add_action( 'login_enqueue_scripts', array( $this, 'remove_login_hints' ) );
+				add_action( 'login_init', array( $this, 'remove_login_hints' ) );
 			}
 
 			// Login rate limiting
@@ -156,7 +153,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			}
 
 			// Log activation
-			$this->log_security_event( 'plugin_activated', 'Security Hardener plugin activated' );
+			$this->log_security_event( 'plugin_activated', __( 'Security Hardener plugin activated', 'security-hardener' ) );
 		}
 
 		/**
@@ -164,13 +161,13 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 */
 		public function deactivate(): void {
 			// Log deactivation
-			$this->log_security_event( 'plugin_deactivated', 'Security Hardener plugin deactivated' );
+			$this->log_security_event( 'plugin_deactivated', __( 'Security Hardener plugin deactivated', 'security-hardener' ) );
 		}
 
 		/**
 		 * Get default options
 		 *
-		 * @return array
+		 * @return array<string, int>
 		 */
 		private function get_default_options(): array {
 			return [
@@ -200,7 +197,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'clean_head'               => 1,
 
 				// Security headers
-				'enable_headers'           => 1,
 				'header_x_frame'           => 1,
 				'header_x_content'         => 1,
 				'header_referrer'          => 1,
@@ -208,8 +204,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 				// HTTPS
 				'enable_hsts'              => 0, // Off by default - requires HTTPS
-				'hsts_max_age'             => 31536000,
-				'hsts_subdomains'          => 1,
+				'hsts_subdomains'          => 0,
 				'hsts_preload'             => 0,
 
 				// Advanced
@@ -262,10 +257,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * Send security headers
 		 */
 		public function send_security_headers(): void {
-			if ( ! $this->get_option( 'enable_headers', true ) ) {
-				return;
-			}
-
 			// Prevent sent headers warning
 			if ( headers_sent() ) {
 				return;
@@ -293,10 +284,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 			// HSTS (only if HTTPS and enabled)
 			if ( $this->get_option( 'enable_hsts', false ) && is_ssl() ) {
-				$max_age     = absint( $this->get_option( 'hsts_max_age', 31536000 ) );
-				$hsts_header = "Strict-Transport-Security: max-age={$max_age}";
+				$hsts_header = 'Strict-Transport-Security: max-age=31536000';
 
-				if ( $this->get_option( 'hsts_subdomains', true ) ) {
+				if ( $this->get_option( 'hsts_subdomains', false ) ) {
 					$hsts_header .= '; includeSubDomains';
 				}
 
@@ -318,6 +308,23 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			unset( $methods['pingback.ping'] );
 			unset( $methods['pingback.extensions.getPingbacks'] );
 			return $methods;
+		}
+
+		/**
+		 * Remove WordPress version number from script and style URLs.
+		 *
+		 * Only strips ?ver= when its value matches the WordPress core version,
+		 * leaving plugin and theme asset versions intact.
+		 *
+		 * @param string $src Asset URL.
+		 * @return string
+		 */
+		public function remove_wp_version_from_assets( string $src ): string {
+			global $wp_version;
+			if ( str_contains( $src, "ver={$wp_version}" ) ) {
+				$src = remove_query_arg( 'ver', $src );
+			}
+			return $src;
 		}
 
 		/**
@@ -419,17 +426,28 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		}
 
 		/**
-		 * Remove login hints from login page
+		 * Prevent username/email enumeration via the lost password form.
+		 *
+		 * WordPress shows different error messages depending on whether the submitted
+		 * username or email exists in the database, allowing attackers to enumerate
+		 * valid accounts. This replaces any lostpassword error with a single generic
+		 * message that does not reveal whether an account exists.
+		 *
+		 * Uses lostpassword_errors (WP 5.5+) rather than login_messages so that only
+		 * the lost password flow is affected — other login messages from WordPress or
+		 * third-party plugins are left completely intact.
 		 */
 		public function remove_login_hints(): void {
-			// Remove "lost password" text that reveals if username exists
 			add_filter(
-				'login_messages',
-				function ( $message ) {
-					if ( strpos( $message, 'check your email' ) !== false ) {
-						return '<strong>' . esc_html__( 'Check your email for the confirmation link.', 'security-hardener' ) . '</strong>';
+				'lostpassword_errors',
+				function ( \WP_Error $errors ): \WP_Error {
+					if ( $errors->has_errors() ) {
+						return new \WP_Error(
+							'generic_error',
+							esc_html__( 'If an account exists with that email, you will receive a reset link shortly.', 'security-hardener' )
+						);
 					}
-					return $message;
+					return $errors;
 				}
 			);
 		}
@@ -519,10 +537,10 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Clear login attempts on successful login
 		 *
-		 * @param string  $user_login Username.
-		 * @param WP_User $user User object.
+		 * @param string  $_user_login Username (unused, required by hook).
+		 * @param WP_User $_user       User object (unused, required by hook).
 		 */
-		public function clear_login_attempts( $user_login, $user ): void {
+		public function clear_login_attempts( $_user_login, $_user ): void {
 			$ip           = $this->get_client_ip();
 			$attempts_key = 'wpsh_login_attempts_' . md5( $ip );
 			$blocked_key  = 'wpsh_login_blocked_' . md5( $ip );
@@ -581,9 +599,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $links Links to ping.
 		 */
 		public function disable_self_pingbacks( &$links ): void {
-			$home = get_option( 'home' );
+			$home = home_url();
 			foreach ( $links as $l => $link ) {
-				if ( 0 === strpos( $link, $home ) ) {
+				if ( str_starts_with( $link, $home ) ) {
 					unset( $links[ $l ] );
 				}
 			}
@@ -610,14 +628,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// Remove Windows Live Writer manifest link
 			remove_action( 'wp_head', 'wlwmanifest_link' );
 
-			// Remove WordPress version
-			remove_action( 'wp_head', 'wp_generator' );
-
 			// Remove shortlink
 			remove_action( 'wp_head', 'wp_shortlink_wp_head' );
-
-			// Remove feed links (keep main feed)
-			remove_action( 'wp_head', 'feed_links_extra', 3 );
 
 			// Remove emoji scripts
 			remove_action( 'wp_head', 'print_emoji_detection_script', 7 );
@@ -632,7 +644,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string $event_type Event type.
 		 * @param string $message Event message.
 		 */
-		private function log_security_event( $event_type, $message ): void {
+		private function log_security_event( string $event_type, string $message ): void {
 			if ( ! $this->get_option( 'log_security_events', true ) ) {
 				return;
 			}
@@ -645,11 +657,10 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 			// Add new log entry
 			$logs[] = array(
-				'timestamp'  => current_time( 'mysql' ),
-				'type'       => $event_type,
-				'message'    => $message,
-				'ip'         => $ip,
-				'user_agent' => isset( $_SERVER['HTTP_USER_AGENT'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ) : '',
+				'timestamp' => current_time( 'mysql' ),
+				'type'      => $event_type,
+				'message'   => $message,
+				'ip'        => $ip,
 			);
 
 			// Keep only last 100 entries
@@ -676,6 +687,10 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 		/**
 		 * Register settings
+		 *
+		 * Only register_setting() is needed here — sanitize_callback handles validation,
+		 * and settings_fields() in the form generates the nonce. Sections and fields are
+		 * rendered manually in render_settings_page() via the custom card grid.
 		 */
 		public function register_settings(): void {
 			register_setting(
@@ -685,198 +700,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					'type'              => 'array',
 					'sanitize_callback' => array( $this, 'sanitize_options' ),
 				)
-			);
-
-			// File Editing section
-			add_settings_section(
-				'wpsh_file_editing',
-				__( 'File Editing', 'security-hardener' ),
-				function () {
-					echo '<p>' . esc_html__( 'Control file editing capabilities in WordPress admin.', 'security-hardener' ) . '</p>';
-				},
-				'security-hardener'
-			);
-
-			$this->add_checkbox_field( 'disable_file_edit', __( 'Disable file editor', 'security-hardener' ), 'wpsh_file_editing', __( 'Prevents editing of theme and plugin files through WordPress admin.', 'security-hardener' ) );
-			$this->add_checkbox_field( 'disable_file_mods', __( 'Disable all file modifications', 'security-hardener' ), 'wpsh_file_editing', '<strong>' . esc_html__( 'Warning:', 'security-hardener' ) . '</strong> ' . esc_html__( 'This will disable plugin/theme updates and installations.', 'security-hardener' ) );
-
-			// XML-RPC section
-			add_settings_section(
-				'wpsh_xmlrpc',
-				__( 'XML-RPC', 'security-hardener' ),
-				function () {
-					echo '<p>' . esc_html__( 'XML-RPC is often targeted by attackers. Disable unless you need it for Jetpack or mobile apps.', 'security-hardener' ) . '</p>';
-				},
-				'security-hardener'
-			);
-
-			$this->add_checkbox_field( 'disable_xmlrpc', __( 'Disable XML-RPC', 'security-hardener' ), 'wpsh_xmlrpc' );
-			$this->add_checkbox_field( 'disable_pingbacks', __( 'Disable pingbacks', 'security-hardener' ), 'wpsh_xmlrpc' );
-
-			// User Enumeration section
-			add_settings_section(
-				'wpsh_user_enum',
-				__( 'User Enumeration Protection', 'security-hardener' ),
-				function () {
-					echo '<p>' . esc_html__( 'Prevent attackers from discovering usernames through various WordPress features.', 'security-hardener' ) . '</p>';
-				},
-				'security-hardener'
-			);
-
-			$this->add_checkbox_field( 'block_user_enum', __( 'Block user enumeration', 'security-hardener' ), 'wpsh_user_enum', __( 'Blocks ?author=N queries, secures REST API user endpoints, and removes users from sitemaps.', 'security-hardener' ) );
-			$this->add_checkbox_field( 'hide_wp_version', __( 'Hide WordPress version', 'security-hardener' ), 'wpsh_user_enum' );
-
-			// Login Security section
-			add_settings_section(
-				'wpsh_login',
-				__( 'Login Security', 'security-hardener' ),
-				function () {
-					echo '<p>' . esc_html__( 'Protect against brute force attacks and information disclosure.', 'security-hardener' ) . '</p>';
-				},
-				'security-hardener'
-			);
-
-			$this->add_checkbox_field( 'secure_login', __( 'Generic login errors', 'security-hardener' ), 'wpsh_login', __( 'Don\'t reveal whether username or password was incorrect.', 'security-hardener' ) );
-			$this->add_checkbox_field( 'rate_limit_login', __( 'Enable login rate limiting', 'security-hardener' ), 'wpsh_login' );
-
-			add_settings_field(
-				'rate_limit_attempts',
-				__( 'Failed attempts before block', 'security-hardener' ),
-				array( $this, 'render_number_field' ),
-				'security-hardener',
-				'wpsh_login',
-				array(
-					'field_id' => 'rate_limit_attempts',
-					'min'      => 3,
-					'max'      => 20,
-					'default'  => 5,
-				)
-			);
-
-			add_settings_field(
-				'rate_limit_minutes',
-				__( 'Block duration (minutes)', 'security-hardener' ),
-				array( $this, 'render_number_field' ),
-				'security-hardener',
-				'wpsh_login',
-				array(
-					'field_id' => 'rate_limit_minutes',
-					'min'      => 5,
-					'max'      => 1440,
-					'default'  => 15,
-				)
-			);
-
-			// Security Headers section
-			add_settings_section(
-				'wpsh_headers',
-				__( 'Security Headers', 'security-hardener' ),
-				function () {
-					echo '<p>' . esc_html__( 'Send HTTP security headers to protect against various attacks.', 'security-hardener' ) . '</p>';
-				},
-				'security-hardener'
-			);
-
-			$this->add_checkbox_field( 'enable_headers', __( 'Enable security headers', 'security-hardener' ), 'wpsh_headers' );
-			$this->add_checkbox_field( 'header_x_frame', __( 'X-Frame-Options (clickjacking protection)', 'security-hardener' ), 'wpsh_headers' );
-			$this->add_checkbox_field( 'header_x_content', __( 'X-Content-Type-Options (MIME sniffing protection)', 'security-hardener' ), 'wpsh_headers' );
-			$this->add_checkbox_field( 'header_referrer', __( 'Referrer-Policy', 'security-hardener' ), 'wpsh_headers' );
-			$this->add_checkbox_field( 'header_permissions', __( 'Permissions-Policy', 'security-hardener' ), 'wpsh_headers' );
-
-			// HSTS section
-			add_settings_section(
-				'wpsh_hsts',
-				__( 'HSTS (HTTPS Sites Only)', 'security-hardener' ),
-				function () {
-					echo '<p>' . esc_html__( 'HTTP Strict Transport Security forces HTTPS. Only enable if your entire site uses HTTPS.', 'security-hardener' ) . '</p>';
-					if ( ! is_ssl() ) {
-						echo '<p class="description" style="color: #d63638;"><strong>' . esc_html__( 'Warning: Your site is not currently using HTTPS. Do not enable HSTS.', 'security-hardener' ) . '</strong></p>';
-					}
-				},
-				'security-hardener'
-			);
-
-			$this->add_checkbox_field( 'enable_hsts', __( 'Enable HSTS', 'security-hardener' ), 'wpsh_hsts', '<strong>' . esc_html__( 'Warning:', 'security-hardener' ) . '</strong> ' . esc_html__( 'Only enable if your site fully supports HTTPS.', 'security-hardener' ) );
-			$this->add_checkbox_field( 'hsts_subdomains', __( 'Include subdomains', 'security-hardener' ), 'wpsh_hsts' );
-			$this->add_checkbox_field( 'hsts_preload', __( 'Enable preload', 'security-hardener' ), 'wpsh_hsts', __( 'Submit to <a href="https://hstspreload.org/" target="_blank">HSTS Preload List</a> (requires 1 year max-age).', 'security-hardener' ) );
-
-			// Other section
-			add_settings_section(
-				'wpsh_other',
-				__( 'Other Settings', 'security-hardener' ),
-				null,
-				'security-hardener'
-			);
-
-			$this->add_checkbox_field( 'clean_head', __( 'Clean wp_head', 'security-hardener' ), 'wpsh_other', __( 'Remove unnecessary items from &lt;head&gt; section.', 'security-hardener' ) );
-			$this->add_checkbox_field( 'log_security_events', __( 'Log security events', 'security-hardener' ), 'wpsh_other', __( 'Keep a log of security events (last 100 entries).', 'security-hardener' ) );
-			$this->add_checkbox_field( 'delete_data_on_uninstall', __( 'Delete all data on uninstall', 'security-hardener' ), 'wpsh_other', '<strong>' . esc_html__( 'Warning:', 'security-hardener' ) . '</strong> ' . esc_html__( 'When enabled, all plugin settings and security logs will be permanently deleted when the plugin is uninstalled. Disabled by default to preserve data.', 'security-hardener' ) );
-		}
-
-		/**
-		 * Add checkbox field helper
-		 *
-		 * @param string $field_id Field ID.
-		 * @param string $label Field label.
-		 * @param string $section Section ID.
-		 * @param string $description Optional description.
-		 */
-		private function add_checkbox_field( $field_id, $label, $section, $description = '' ): void {
-			add_settings_field(
-				$field_id,
-				$label,
-				array( $this, 'render_checkbox_field' ),
-				'security-hardener',
-				$section,
-				array(
-					'field_id'    => $field_id,
-					'description' => $description,
-				)
-			);
-		}
-
-		/**
-		 * Render checkbox field
-		 *
-		 * @param array $args {
-		 *     Field arguments.
-		 *
-		 *     @type string $field_id    Option key in the stored options array.
-		 *     @type string $description Optional description shown beside the checkbox.
-		 * }
-		 */
-		public function render_checkbox_field( $args ): void {
-			$field_id = $args['field_id'];
-			$value    = $this->get_option( $field_id, 0 );
-			$checked  = checked( 1, $value, false );
-
-			printf(
-				'<label><input type="checkbox" name="%s[%s]" value="1" %s /> %s</label>',
-				esc_attr( self::OPTION_NAME ),
-				esc_attr( $field_id ),
-				$checked, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-				! empty( $args['description'] ) ? wp_kses_post( $args['description'] ) : esc_html__( 'Enable', 'security-hardener' )
-			);
-		}
-
-		/**
-		 * Render number field
-		 *
-		 * @param array $args Field arguments.
-		 */
-		public function render_number_field( $args ): void {
-			$field_id = $args['field_id'];
-			$value    = $this->get_option( $field_id, $args['default'] );
-			$min      = isset( $args['min'] ) ? absint( $args['min'] ) : 1;
-			$max      = isset( $args['max'] ) ? absint( $args['max'] ) : 999;
-
-			printf(
-				'<input type="number" name="%s[%s]" value="%s" min="%d" max="%d" class="small-text" />',
-				esc_attr( self::OPTION_NAME ),
-				esc_attr( $field_id ),
-				esc_attr( $value ),
-				absint( $min ),
-				absint( $max )
 			);
 		}
 
@@ -903,7 +726,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'block_user_enum',
 				'secure_login',
 				'rate_limit_login',
-				'enable_headers',
 				'header_x_frame',
 				'header_x_content',
 				'header_referrer',
@@ -924,19 +746,140 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			}
 
 			// Numeric fields
-			$sanitized['rate_limit_attempts'] = isset( $input['rate_limit_attempts'] )
-				? max( 3, min( 20, absint( $input['rate_limit_attempts'] ) ) )
-				: 5;
+			$raw_attempts = isset( $input['rate_limit_attempts'] ) ? absint( $input['rate_limit_attempts'] ) : 5;
+			$sanitized['rate_limit_attempts'] = max( 3, min( 20, $raw_attempts ) );
+			if ( $raw_attempts !== $sanitized['rate_limit_attempts'] ) {
+				add_settings_error(
+					self::OPTION_NAME,
+					'rate_limit_attempts_range',
+					__( '"Failed attempts before block" must be between 3 and 20. Value has been adjusted.', 'security-hardener' ),
+					'warning'
+				);
+			}
 
-			$sanitized['rate_limit_minutes'] = isset( $input['rate_limit_minutes'] )
-				? max( 5, min( 1440, absint( $input['rate_limit_minutes'] ) ) )
-				: 15;
-
-			$sanitized['hsts_max_age'] = isset( $input['hsts_max_age'] )
-				? max( 300, min( 63072000, absint( $input['hsts_max_age'] ) ) )
-				: 31536000;
+			$raw_minutes = isset( $input['rate_limit_minutes'] ) ? absint( $input['rate_limit_minutes'] ) : 15;
+			$sanitized['rate_limit_minutes'] = max( 5, min( 1440, $raw_minutes ) );
+			if ( $raw_minutes !== $sanitized['rate_limit_minutes'] ) {
+				add_settings_error(
+					self::OPTION_NAME,
+					'rate_limit_minutes_range',
+					__( '"Block duration" must be between 5 and 1440 minutes. Value has been adjusted.', 'security-hardener' ),
+					'warning'
+				);
+			}
 
 			return $sanitized;
+		}
+
+		/**
+		 * Output inline admin styles for the settings page grid layout and toggles.
+		 * Uses only WordPress admin colour variables so it adapts to any admin theme.
+		 */
+		private function render_admin_styles(): void {
+			?>
+			<style>
+				.wpsh-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:16px;}
+				.wpsh-card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;padding:0;}
+				.wpsh-card-header{padding:12px 16px;border-bottom:1px solid #c3c4c7;}
+				.wpsh-card-title{margin:0;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#646970;}
+				.wpsh-card-body{padding:4px 0;}
+				.wpsh-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid #f0f0f1;}
+				.wpsh-row:last-child{border-bottom:none;}
+				.wpsh-row-text{flex:1;min-width:0;}
+				.wpsh-row-label{font-size:13px;color:#1d2327;line-height:1.4;}
+				.wpsh-row-desc{font-size:12px;color:#646970;margin-top:2px;line-height:1.4;}
+				.wpsh-row-number{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+				.wpsh-row-number input{width:60px;}
+				.wpsh-row-number span{font-size:12px;color:#646970;}
+				.wpsh-toggle{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;margin-top:1px;}
+				.wpsh-toggle input{opacity:0;width:0;height:0;position:absolute;}
+				.wpsh-toggle-track{position:absolute;inset:0;background:#c3c4c7;border-radius:20px;transition:background .15s;}
+				.wpsh-toggle input:checked~.wpsh-toggle-track{background:#2271b1;}
+				.wpsh-toggle-thumb{position:absolute;width:14px;height:14px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .15s;pointer-events:none;}
+				.wpsh-toggle input:checked~.wpsh-toggle-thumb{left:19px;}
+				.wpsh-toggle input:focus~.wpsh-toggle-track{box-shadow:0 0 0 2px #2271b1,0 0 0 4px rgba(34,113,177,.3);}
+				.wpsh-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-left:5px;vertical-align:middle;text-transform:uppercase;letter-spacing:.03em;}
+				.wpsh-badge-warn{background:#fcf9e8;color:#996800;border:1px solid #f0c33c;}
+				.wpsh-badge-https{background:#f0f6fc;color:#2271b1;border:1px solid #72aee6;}
+				.wpsh-hsts-warn{font-size:12px;color:#d63638;padding:8px 16px 0;font-weight:600;}
+				.wpsh-section-header{display:flex;align-items:center;justify-content:space-between;padding:20px 0 8px;}
+				.wpsh-logs-table{margin-top:8px;}
+				.wpsh-recommendations{margin-top:0;}
+				.wpsh-recommendations li{margin-bottom:4px;}
+				.wpsh-save-bar{margin:20px 0 4px;}
+				@media(max-width:1200px){.wpsh-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+				@media(max-width:782px){.wpsh-grid{grid-template-columns:minmax(0,1fr);}}
+			</style>
+			<?php
+		}
+
+		/**
+		 * Render a single card row with a toggle.
+		 *
+		 * @param string $field_id    Option key.
+		 * @param string $label       Row label.
+		 * @param string $description Optional description.
+		 * @param string $badge_html  Optional badge HTML (already escaped).
+		 */
+		private function render_toggle_row( string $field_id, string $label, string $description = '', string $badge_html = '' ): void {
+			$value      = $this->get_option( $field_id, 0 );
+			$checked    = checked( 1, $value, false );
+			$input_name = esc_attr( self::OPTION_NAME ) . '[' . esc_attr( $field_id ) . ']';
+			?>
+			<div class="wpsh-row">
+				<div class="wpsh-row-text">
+					<div class="wpsh-row-label">
+						<?php echo esc_html( $label ); ?>
+						<?php echo $badge_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- pre-escaped by caller ?>
+					</div>
+					<?php if ( $description ) : ?>
+						<div class="wpsh-row-desc"><?php echo wp_kses_post( $description ); ?></div>
+					<?php endif; ?>
+				</div>
+				<label class="wpsh-toggle">
+					<input type="checkbox" name="<?php echo $input_name; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fully escaped above ?>" value="1" <?php echo $checked; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- output of checked() ?>>
+					<div class="wpsh-toggle-track"></div>
+					<div class="wpsh-toggle-thumb"></div>
+				</label>
+			</div>
+			<?php
+		}
+
+		/**
+		 * Render a single card row with a number input.
+		 *
+		 * @param string $field_id    Field ID.
+		 * @param string $label       Row label.
+		 * @param int    $min         Minimum value.
+		 * @param int    $max         Maximum value.
+		 * @param int    $default     Default value.
+		 * @param string $unit        Unit label shown after the input.
+		 * @param string $description Optional description shown below the label.
+		 */
+		private function render_number_row( string $field_id, string $label, int $min, int $max, int $default, string $unit = '', string $description = '' ): void {
+			$value      = $this->get_option( $field_id, $default );
+			$input_name = esc_attr( self::OPTION_NAME ) . '[' . esc_attr( $field_id ) . ']';
+			?>
+			<div class="wpsh-row">
+				<div class="wpsh-row-text">
+					<div class="wpsh-row-label"><?php echo esc_html( $label ); ?></div>
+					<?php if ( $description ) : ?>
+						<div class="wpsh-row-desc"><?php echo esc_html( $description ); ?></div>
+					<?php endif; ?>
+				</div>
+				<div class="wpsh-row-number">
+					<input type="number"
+						name="<?php echo $input_name; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fully escaped above ?>"
+						value="<?php echo esc_attr( $value ); ?>"
+						min="<?php echo absint( $min ); ?>"
+						max="<?php echo absint( $max ); ?>"
+						class="small-text" />
+					<?php if ( $unit ) : ?>
+						<span><?php echo esc_html( $unit ); ?></span>
+					<?php endif; ?>
+				</div>
+			</div>
+			<?php
 		}
 
 		/**
@@ -947,13 +890,17 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				wp_die( esc_html__( 'You do not have sufficient permissions to access this page.', 'security-hardener' ) );
 			}
 
+			$this->render_admin_styles();
+
+			$warn_badge  = '<span class="wpsh-badge wpsh-badge-warn">' . esc_html__( 'Caution', 'security-hardener' ) . '</span>';
+			$https_badge = '<span class="wpsh-badge wpsh-badge-https">' . esc_html__( 'HTTPS only', 'security-hardener' ) . '</span>';
 			?>
 			<div class="wrap">
 				<h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
 
 				<?php settings_errors(); ?>
 
-				<div class="notice notice-info">
+				<div class="notice notice-info inline" style="margin-top:12px;">
 					<p>
 						<strong><?php esc_html_e( 'Important:', 'security-hardener' ); ?></strong>
 						<?php esc_html_e( 'Test these settings in a staging environment first. Some options may break functionality or third-party integrations.', 'security-hardener' ); ?>
@@ -961,19 +908,217 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				</div>
 
 				<form method="post" action="options.php">
-					<?php
-					settings_fields( 'wpsh_settings' );
-					do_settings_sections( 'security-hardener' );
-					submit_button();
-					?>
+					<?php settings_fields( 'wpsh_settings' ); ?>
+
+					<div class="wpsh-grid">
+
+						<!-- File Editing -->
+						<div class="wpsh-card">
+							<div class="wpsh-card-header">
+								<h2 class="wpsh-card-title"><?php esc_html_e( 'File editing', 'security-hardener' ); ?></h2>
+							</div>
+							<div class="wpsh-card-body">
+								<?php
+								$this->render_toggle_row(
+									'disable_file_edit',
+									__( 'Disable file editor', 'security-hardener' ),
+									__( 'Prevents editing theme and plugin files in WordPress admin.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'disable_file_mods',
+									__( 'Disable all file modifications', 'security-hardener' ),
+									__( 'Blocks plugin/theme updates and installations.', 'security-hardener' ),
+									$warn_badge
+								);
+								?>
+							</div>
+						</div>
+
+						<!-- XML-RPC & Pingbacks -->
+						<div class="wpsh-card">
+							<div class="wpsh-card-header">
+								<h2 class="wpsh-card-title"><?php esc_html_e( 'XML-RPC &amp; pingbacks', 'security-hardener' ); ?></h2>
+							</div>
+							<div class="wpsh-card-body">
+								<?php
+								$this->render_toggle_row(
+									'disable_xmlrpc',
+									__( 'Disable XML-RPC', 'security-hardener' ),
+									__( 'Recommended unless you use Jetpack or the mobile app.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'disable_pingbacks',
+									__( 'Disable pingbacks', 'security-hardener' ),
+									__( 'Removes the X-Pingback header and disables incoming and self-referencing pingbacks.', 'security-hardener' )
+								);
+								?>
+							</div>
+						</div>
+
+						<!-- User Enumeration -->
+						<div class="wpsh-card">
+							<div class="wpsh-card-header">
+								<h2 class="wpsh-card-title"><?php esc_html_e( 'User enumeration', 'security-hardener' ); ?></h2>
+							</div>
+							<div class="wpsh-card-body">
+								<?php
+								$this->render_toggle_row(
+									'block_user_enum',
+									__( 'Block user enumeration', 'security-hardener' ),
+									__( 'Blocks ?author=N queries, canonical redirects, REST API user endpoints, and removes users from sitemaps.', 'security-hardener' )
+								);
+								?>
+							</div>
+						</div>
+
+						<!-- Login Security -->
+						<div class="wpsh-card">
+							<div class="wpsh-card-header">
+								<h2 class="wpsh-card-title"><?php esc_html_e( 'Login security', 'security-hardener' ); ?></h2>
+							</div>
+							<div class="wpsh-card-body">
+								<?php
+								$this->render_toggle_row(
+									'secure_login',
+									__( 'Generic login errors', 'security-hardener' ),
+									__( "Don't reveal whether the username or password was incorrect.", 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'rate_limit_login',
+									__( 'Login rate limiting', 'security-hardener' ),
+									__( 'Blocks an IP after repeated failed login attempts.', 'security-hardener' )
+								);
+								$this->render_number_row(
+									'rate_limit_attempts',
+									__( 'Failed attempts before block', 'security-hardener' ),
+									3, 20, 5,
+									__( 'attempts', 'security-hardener' ),
+									__( 'Min. 3 — Max. 20', 'security-hardener' )
+								);
+								$this->render_number_row(
+									'rate_limit_minutes',
+									__( 'Block duration', 'security-hardener' ),
+									5, 1440, 15,
+									__( 'minutes', 'security-hardener' ),
+									__( 'Min. 5 — Max. 1440', 'security-hardener' )
+								);
+								?>
+							</div>
+						</div>
+
+						<!-- Security Headers -->
+						<div class="wpsh-card">
+							<div class="wpsh-card-header">
+								<h2 class="wpsh-card-title"><?php esc_html_e( 'Security headers', 'security-hardener' ); ?></h2>
+							</div>
+							<div class="wpsh-card-body">
+								<?php
+								$this->render_toggle_row(
+									'header_x_frame',
+									__( 'X-Frame-Options', 'security-hardener' ),
+									__( 'Clickjacking protection. Set to SAMEORIGIN.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'header_x_content',
+									__( 'X-Content-Type-Options', 'security-hardener' ),
+									__( 'MIME sniffing protection. Set to nosniff.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'header_referrer',
+									__( 'Referrer-Policy', 'security-hardener' ),
+									__( 'Controls referrer information sent to external sites. Set to strict-origin-when-cross-origin.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'header_permissions',
+									__( 'Permissions-Policy', 'security-hardener' ),
+									__( 'Restricts access to geolocation, microphone and camera.', 'security-hardener' )
+								);
+								?>
+							</div>
+						</div>
+
+						<!-- HSTS -->
+						<div class="wpsh-card">
+							<div class="wpsh-card-header">
+								<h2 class="wpsh-card-title">
+									<?php esc_html_e( 'HSTS', 'security-hardener' ); ?>
+									<?php echo $https_badge; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- pre-escaped ?>
+								</h2>
+							</div>
+							<div class="wpsh-card-body">
+								<?php if ( ! is_ssl() ) : ?>
+									<p class="wpsh-hsts-warn"><?php esc_html_e( '⚠ Your site is not using HTTPS. Do not enable HSTS.', 'security-hardener' ); ?></p>
+								<?php endif; ?>
+								<?php
+								$this->render_toggle_row(
+									'enable_hsts',
+									__( 'Enable HSTS', 'security-hardener' ),
+									__( 'Forces HTTPS. Only enable if your entire site supports HTTPS.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'hsts_subdomains',
+									__( 'Include subdomains', 'security-hardener' ),
+									__( 'Applies the HSTS policy to all subdomains. Only enable if all your subdomains also use HTTPS.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'hsts_preload',
+									__( 'Enable preload', 'security-hardener' ),
+									sprintf(
+										/* translators: %s: URL to HSTS preload list */
+										wp_kses_post( __( 'Submit to the <a href="%s" target="_blank">HSTS Preload List</a>. Requires 1 year max-age.', 'security-hardener' ) ),
+										'https://hstspreload.org/'
+									)
+								);
+								?>
+							</div>
+						</div>
+
+						<!-- Other Settings -->
+						<div class="wpsh-card">
+							<div class="wpsh-card-header">
+								<h2 class="wpsh-card-title"><?php esc_html_e( 'Other settings', 'security-hardener' ); ?></h2>
+							</div>
+							<div class="wpsh-card-body">
+								<?php
+								$this->render_toggle_row(
+									'hide_wp_version',
+									__( 'Hide WordPress version', 'security-hardener' ),
+									__( 'Removes the generator meta tag and WordPress version from asset URLs (?ver=).', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'clean_head',
+									__( 'Clean wp_head', 'security-hardener' ),
+									__( 'Removes RSD link, Windows Live Writer manifest, shortlink, and emoji scripts from &lt;head&gt;.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'log_security_events',
+									__( 'Log security events', 'security-hardener' ),
+									__( 'Keeps a log of the last 100 security events.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'delete_data_on_uninstall',
+									__( 'Delete all data on uninstall', 'security-hardener' ),
+									__( 'Permanently deletes all settings and logs on uninstall. Disabled by default.', 'security-hardener' ),
+									$warn_badge
+								);
+								?>
+							</div>
+						</div>
+
+					</div><!-- .wpsh-grid -->
+
+					<div class="wpsh-save-bar">
+						<?php submit_button( null, 'primary', 'submit', false ); ?>
+					</div>
+
 				</form>
 
 				<?php $this->render_security_logs(); ?>
 
-				<hr>
+				<hr style="margin: 24px 0;">
 
 				<h2><?php esc_html_e( 'Additional Hardening Recommendations', 'security-hardener' ); ?></h2>
-				<ul style="list-style: disc; padding-left: 20px;">
+				<ul class="wpsh-recommendations" style="list-style: disc; padding-left: 20px;">
 					<li><?php esc_html_e( 'Use strong passwords and enable two-factor authentication', 'security-hardener' ); ?></li>
 					<li><?php esc_html_e( 'Keep WordPress, themes, and plugins updated', 'security-hardener' ); ?></li>
 					<li><?php esc_html_e( 'Use HTTPS (SSL/TLS) for your entire site', 'security-hardener' ); ?></li>
@@ -984,8 +1129,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					<li><?php esc_html_e( 'Consider using a Web Application Firewall (WAF)', 'security-hardener' ); ?></li>
 					<li><?php esc_html_e( 'Protect the wp-admin directory with an additional HTTP authentication layer (BasicAuth)', 'security-hardener' ); ?></li>
 					<li><?php esc_html_e( 'Change the default database table prefix from wp_ to a custom value', 'security-hardener' ); ?></li>
+					<li><?php esc_html_e( 'Rename the default admin account to a non-obvious username', 'security-hardener' ); ?></li>
+					<li><?php esc_html_e( 'Restrict database user privileges to SELECT, INSERT, UPDATE and DELETE only', 'security-hardener' ); ?></li>
+					<li><?php esc_html_e( 'Protect wp-config.php by moving it one directory above the WordPress root or restricting access via .htaccess', 'security-hardener' ); ?></li>
+					<li><?php esc_html_e( 'Block direct access to files in wp-includes/ by adding the following rules to your .htaccess file (outside the WordPress tags).', 'security-hardener' ); ?></li>
 				</ul>
-
 				<p>
 					<?php
 					printf(
@@ -995,7 +1143,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					);
 					?>
 				</p>
-			</div>
+
+			</div><!-- .wrap -->
 			<?php
 		}
 
@@ -1013,27 +1162,31 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				return;
 			}
 
+			// Reverse to show newest first, limit to 20
+			$logs = array_slice( array_reverse( $logs ), 0, 20 );
 			?>
-			<hr>
-			<h2><?php esc_html_e( 'Recent Security Events', 'security-hardener' ); ?></h2>
-			<table class="wp-list-table widefat fixed striped">
+			<hr style="margin: 24px 0;">
+			<div class="wpsh-section-header">
+				<h2 style="margin: 0;"><?php esc_html_e( 'Recent Security Events', 'security-hardener' ); ?></h2>
+				<form method="post" action="">
+					<?php wp_nonce_field( 'wpsh_clear_logs' ); ?>
+					<input type="hidden" name="wpsh_action" value="clear_logs" />
+					<button type="submit" class="button">
+						<?php esc_html_e( 'Clear Logs', 'security-hardener' ); ?>
+					</button>
+				</form>
+			</div>
+			<table class="wp-list-table widefat fixed striped wpsh-logs-table">
 				<thead>
 					<tr>
-						<th><?php esc_html_e( 'Timestamp', 'security-hardener' ); ?></th>
-						<th><?php esc_html_e( 'Event Type', 'security-hardener' ); ?></th>
+						<th style="width:160px;"><?php esc_html_e( 'Timestamp', 'security-hardener' ); ?></th>
+						<th style="width:140px;"><?php esc_html_e( 'Event Type', 'security-hardener' ); ?></th>
 						<th><?php esc_html_e( 'Message', 'security-hardener' ); ?></th>
-						<th><?php esc_html_e( 'IP Address', 'security-hardener' ); ?></th>
+						<th style="width:120px;"><?php esc_html_e( 'IP Address', 'security-hardener' ); ?></th>
 					</tr>
 				</thead>
 				<tbody>
-					<?php
-					// Reverse to show newest first
-					$logs = array_reverse( $logs );
-					// Limit to 20 most recent
-					$logs = array_slice( $logs, 0, 20 );
-
-					foreach ( $logs as $log ) :
-						?>
+					<?php foreach ( $logs as $log ) : ?>
 						<tr>
 							<td><?php echo esc_html( $log['timestamp'] ); ?></td>
 							<td><?php echo esc_html( $log['type'] ); ?></td>
@@ -1043,13 +1196,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					<?php endforeach; ?>
 				</tbody>
 			</table>
-			<p>
-				<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'options-general.php?page=security-hardener&action=clear_logs' ), 'wpsh_clear_logs' ) ); ?>" 
-				   class="button"
-				   onclick="return confirm('<?php esc_attr_e( 'Are you sure you want to clear all security logs?', 'security-hardener' ); ?>');">
-					<?php esc_html_e( 'Clear Logs', 'security-hardener' ); ?>
-				</a>
-			</p>
 			<?php
 		}
 
@@ -1057,9 +1203,13 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * Show admin notices
 		 */
 		public function show_admin_notices(): void {
-			// Clear logs action - verify nonce to prevent CSRF
-			if ( isset( $_GET['action'] ) && 'clear_logs' === $_GET['action'] && current_user_can( 'manage_options' ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce is verified on the next line
-				if ( ! isset( $_GET['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ), 'wpsh_clear_logs' ) ) {
+			// Clear logs action — verify nonce and capability via POST
+			$wpsh_action = isset( $_POST['wpsh_action'] ) ? sanitize_key( wp_unslash( $_POST['wpsh_action'] ) ) : '';
+			if (
+				'clear_logs' === $wpsh_action &&
+				current_user_can( 'manage_options' )
+			) {
+				if ( ! isset( $_POST['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ), 'wpsh_clear_logs' ) ) {
 					wp_die( esc_html__( 'Security check failed.', 'security-hardener' ) );
 				}
 				delete_option( 'wpsh_security_logs' );
