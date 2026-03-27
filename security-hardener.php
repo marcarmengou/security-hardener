@@ -3,7 +3,7 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, generic login errors, and IP-based rate limiting.
-Version: 2.0.2
+Version: 2.1.0
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '2.0.2' );
+define( 'WPSH_VERSION', '2.1.0' );
 define( 'WPSH_FILE', __FILE__ );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
@@ -34,6 +34,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * Option name in database
 		 */
 		const OPTION_NAME = 'wpsh_options';
+
+		/**
+		 * Checklist state option name in database
+		 */
+		const CHECKLIST_OPTION = 'wpsh_checklist';
 
 		/**
 		 * Singleton instance
@@ -139,6 +144,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				add_action( 'admin_init', array( $this, 'register_settings' ) );
 				add_action( 'admin_notices', array( $this, 'show_admin_notices' ) );
 				add_filter( 'plugin_action_links_' . WPSH_BASENAME, array( $this, 'add_settings_link' ) );
+				add_action( 'wp_ajax_wpsh_toggle_checklist', array( $this, 'ajax_toggle_checklist' ) );
+				add_action( 'wp_ajax_wpsh_reset_checklist', array( $this, 'ajax_reset_checklist' ) );
 			}
 		}
 
@@ -807,6 +814,22 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				.wpsh-recommendations{margin-top:0;}
 				.wpsh-recommendations li{margin-bottom:4px;}
 				.wpsh-save-bar{margin:20px 0 4px;}
+				.wpsh-cl-header{display:flex;align-items:center;justify-content:space-between;margin-top:24px;}
+				.wpsh-cl-progress{display:flex;align-items:center;gap:8px;}
+				.wpsh-cl-bar{height:6px;width:120px;background:#c3c4c7;border-radius:3px;overflow:hidden;}
+				.wpsh-cl-bar-fill{height:100%;background:#2271b1;border-radius:3px;transition:width .2s;}
+				.wpsh-cl-pct{font-size:12px;color:#646970;white-space:nowrap;}
+				.wpsh-cl-item{display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid #f0f0f1;cursor:pointer;transition:background .1s;}
+				.wpsh-cl-item:last-child{border-bottom:none;}
+				.wpsh-cl-item:hover{background:#f6f7f7;}
+				.wpsh-cl-item:focus{outline:2px solid #2271b1;outline-offset:-2px;}
+				.wpsh-cl-item.wpsh-cl-done{background:#f0f6f0;}
+				.wpsh-cl-check{flex-shrink:0;width:18px;height:18px;border:1.5px solid #c3c4c7;border-radius:3px;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .15s;}
+				.wpsh-cl-item.wpsh-cl-done .wpsh-cl-check{background:#2271b1;border-color:#2271b1;}
+				.wpsh-cl-check svg{display:none;}
+				.wpsh-cl-item.wpsh-cl-done .wpsh-cl-check svg{display:block;}
+				.wpsh-cl-label{font-size:13px;line-height:1.45;color:#1d2327;}
+				.wpsh-cl-item.wpsh-cl-done .wpsh-cl-label{color:#646970;text-decoration:line-through;text-decoration-color:#c3c4c7;}
 				@media(max-width:1200px){.wpsh-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
 				@media(max-width:782px){.wpsh-grid{grid-template-columns:minmax(0,1fr);}}
 			</style>
@@ -879,6 +902,202 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					<?php endif; ?>
 				</div>
 			</div>
+			<?php
+		}
+
+		/**
+		 * AJAX handler — toggle a single checklist item.
+		 *
+		 * Expects POST: nonce, item_id (int 0-13), checked (0|1).
+		 */
+		public function ajax_toggle_checklist(): void {
+			check_ajax_referer( 'wpsh_checklist_nonce', 'nonce' );
+
+			if ( ! current_user_can( 'manage_options' ) ) {
+				wp_send_json_error( 'Unauthorized', 403 );
+			}
+
+			$item_id = isset( $_POST['item_id'] ) ? absint( $_POST['item_id'] ) : null;
+			$checked = isset( $_POST['checked'] ) && '1' === $_POST['checked'];
+
+			if ( null === $item_id || $item_id > 13 ) {
+				wp_send_json_error( 'Invalid item', 400 );
+			}
+
+			$state = get_option( self::CHECKLIST_OPTION, [] );
+
+			if ( $checked ) {
+				$state[ $item_id ] = true;
+			} else {
+				unset( $state[ $item_id ] );
+			}
+
+			update_option( self::CHECKLIST_OPTION, $state, false );
+			wp_send_json_success( [ 'done' => count( $state ), 'total' => 14 ] );
+		}
+
+		/**
+		 * AJAX handler — reset all checklist items.
+		 *
+		 * Expects POST: nonce.
+		 */
+		public function ajax_reset_checklist(): void {
+			check_ajax_referer( 'wpsh_checklist_nonce', 'nonce' );
+
+			if ( ! current_user_can( 'manage_options' ) ) {
+				wp_send_json_error( 'Unauthorized', 403 );
+			}
+
+			update_option( self::CHECKLIST_OPTION, [], false );
+			wp_send_json_success( [ 'done' => 0, 'total' => 14 ] );
+		}
+
+		/**
+		 * Render the interactive hardening recommendations checklist.
+		 *
+		 * State is persisted in wpsh_checklist via AJAX (no page reload needed).
+		 */
+		private function render_checklist(): void {
+			$state = get_option( self::CHECKLIST_OPTION, [] );
+			$done  = count( $state );
+			$total = 14;
+			$pct   = $total > 0 ? round( $done / $total * 100 ) : 0;
+
+			$items = [
+				__( 'Use strong passwords and enable two-factor authentication', 'security-hardener' ),
+				__( 'Keep WordPress, themes, and plugins updated', 'security-hardener' ),
+				__( 'Use HTTPS (SSL/TLS) for your entire site', 'security-hardener' ),
+				__( 'Regular backups stored off-site', 'security-hardener' ),
+				__( 'Limit login attempts at the server/firewall level', 'security-hardener' ),
+				__( 'Use security plugins for malware scanning', 'security-hardener' ),
+				__( 'Restrict file permissions (directories: 755, files: 644)', 'security-hardener' ),
+				__( 'Consider using a Web Application Firewall (WAF)', 'security-hardener' ),
+				__( 'Protect the wp-admin directory with an additional HTTP authentication layer (BasicAuth)', 'security-hardener' ),
+				__( 'Change the default database table prefix from wp_ to a custom value', 'security-hardener' ),
+				__( 'Rename the default admin account to a non-obvious username', 'security-hardener' ),
+				__( 'Restrict database user privileges to SELECT, INSERT, UPDATE and DELETE only', 'security-hardener' ),
+				__( 'Protect wp-config.php by moving it one directory above the WordPress root or restricting access via .htaccess', 'security-hardener' ),
+				__( 'Block direct access to files in wp-includes/ via .htaccess rules — see the WordPress Hardening Guide for the full snippet.', 'security-hardener' ),
+			];
+
+			$nonce = wp_create_nonce( 'wpsh_checklist_nonce' );
+			?>
+			<hr style="margin: 24px 0;">
+
+			<div class="wpsh-cl-header">
+				<h2 style="margin:0;"><?php esc_html_e( 'Additional Hardening Recommendations', 'security-hardener' ); ?></h2>
+				<div class="wpsh-cl-progress">
+					<div class="wpsh-cl-bar">
+						<div class="wpsh-cl-bar-fill" id="wpsh-bar-fill" style="width:<?php echo absint( $pct ); ?>%"></div>
+					</div>
+					<span class="wpsh-cl-pct" id="wpsh-cl-pct">
+						<?php
+						printf(
+							/* translators: 1: completed items, 2: total items */
+							esc_html__( '%1$d / %2$d done', 'security-hardener' ),
+							absint( $done ),
+							absint( $total )
+						);
+						?>
+					</span>
+				</div>
+			</div>
+
+			<div class="wpsh-card" style="margin-top:12px;" id="wpsh-checklist">
+				<?php foreach ( $items as $id => $label ) : ?>
+					<div class="wpsh-cl-item<?php echo isset( $state[ $id ] ) ? ' wpsh-cl-done' : ''; ?>"
+						data-id="<?php echo absint( $id ); ?>"
+						data-nonce="<?php echo esc_attr( $nonce ); ?>"
+						role="checkbox"
+						aria-checked="<?php echo isset( $state[ $id ] ) ? 'true' : 'false'; ?>"
+						tabindex="0">
+						<div class="wpsh-cl-check" aria-hidden="true">
+							<svg width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<path d="M1 4l3 3 5-6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</div>
+						<span class="wpsh-cl-label"><?php echo esc_html( $label ); ?></span>
+					</div>
+				<?php endforeach; ?>
+			</div>
+
+			<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">
+				<p style="margin:0;font-size:12px;color:#646970;">
+					<?php esc_html_e( 'Your progress is saved automatically.', 'security-hardener' ); ?>
+				</p>
+				<button type="button" id="wpsh-cl-reset" class="button-link"
+					data-nonce="<?php echo esc_attr( $nonce ); ?>"
+					style="font-size:12px;color:#2271b1;">
+					<?php esc_html_e( 'Reset all', 'security-hardener' ); ?>
+				</button>
+			</div>
+
+			<p style="margin-top:16px;">
+				<?php
+				printf(
+					/* translators: %s: URL to WordPress hardening guide */
+					wp_kses_post( __( 'For more information, see the official <a href="%s" target="_blank">WordPress Hardening Guide</a>.', 'security-hardener' ) ),
+					'https://developer.wordpress.org/advanced-administration/security/hardening/'
+				);
+				?>
+			</p>
+
+			<script>
+			(function() {
+				var ajaxUrl = <?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>;
+				var total   = <?php echo absint( $total ); ?>;
+
+				function updateProgress( done ) {
+					var pct = total > 0 ? Math.round( done / total * 100 ) : 0;
+					document.getElementById( 'wpsh-bar-fill' ).style.width = pct + '%';
+					document.getElementById( 'wpsh-cl-pct' ).textContent    = done + ' / ' + total + ' done';
+				}
+
+				function sendToggle( id, checked, nonce ) {
+					var fd = new FormData();
+					fd.append( 'action',  'wpsh_toggle_checklist' );
+					fd.append( 'nonce',   nonce );
+					fd.append( 'item_id', id );
+					fd.append( 'checked', checked ? '1' : '0' );
+					fetch( ajaxUrl, { method: 'POST', body: fd, credentials: 'same-origin' } )
+						.then( function( r ) { return r.json(); } )
+						.then( function( data ) { if ( data.success ) updateProgress( data.data.done ); } );
+				}
+
+				document.querySelectorAll( '.wpsh-cl-item' ).forEach( function( el ) {
+					function toggle() {
+						var done    = el.classList.toggle( 'wpsh-cl-done' );
+						var checked = el.classList.contains( 'wpsh-cl-done' );
+						el.setAttribute( 'aria-checked', checked ? 'true' : 'false' );
+						sendToggle( el.dataset.id, checked, el.dataset.nonce );
+					}
+					el.addEventListener( 'click', toggle );
+					el.addEventListener( 'keydown', function( e ) {
+						if ( e.key === ' ' || e.key === 'Enter' ) { e.preventDefault(); toggle(); }
+					} );
+				} );
+
+				var resetBtn = document.getElementById( 'wpsh-cl-reset' );
+				if ( resetBtn ) {
+					resetBtn.addEventListener( 'click', function() {
+						var fd = new FormData();
+						fd.append( 'action', 'wpsh_reset_checklist' );
+						fd.append( 'nonce',  resetBtn.dataset.nonce );
+						fetch( ajaxUrl, { method: 'POST', body: fd, credentials: 'same-origin' } )
+							.then( function( r ) { return r.json(); } )
+							.then( function( data ) {
+								if ( data.success ) {
+									document.querySelectorAll( '.wpsh-cl-item' ).forEach( function( el ) {
+										el.classList.remove( 'wpsh-cl-done' );
+										el.setAttribute( 'aria-checked', 'false' );
+									} );
+									updateProgress( 0 );
+								}
+							} );
+					} );
+				}
+			})();
+			</script>
 			<?php
 		}
 
@@ -1065,7 +1284,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 									__( 'Enable preload', 'security-hardener' ),
 									sprintf(
 										/* translators: %s: URL to HSTS preload list */
-										wp_kses_post( __( 'Submit to the <a href="%s" target="_blank">HSTS Preload List</a>. Requires 1 year max-age.', 'security-hardener' ) ),
+										wp_kses_post( __( 'Adds the preload directive to the HSTS header. Required before submitting manually to <a href="%s" target="_blank">hstspreload.org</a>.', 'security-hardener' ) ),
 										'https://hstspreload.org/'
 									)
 								);
@@ -1088,7 +1307,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 								$this->render_toggle_row(
 									'clean_head',
 									__( 'Clean wp_head', 'security-hardener' ),
-									__( 'Removes RSD link, Windows Live Writer manifest, shortlink, and emoji scripts from &lt;head&gt;.', 'security-hardener' )
+									__( 'Removes RSD link, Windows Live Writer manifest, shortlink, and emoji scripts from the page head.', 'security-hardener' )
 								);
 								$this->render_toggle_row(
 									'log_security_events',
@@ -1115,34 +1334,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 				<?php $this->render_security_logs(); ?>
 
-				<hr style="margin: 24px 0;">
+				<?php $this->render_file_permissions(); ?>
 
-				<h2><?php esc_html_e( 'Additional Hardening Recommendations', 'security-hardener' ); ?></h2>
-				<ul class="wpsh-recommendations" style="list-style: disc; padding-left: 20px;">
-					<li><?php esc_html_e( 'Use strong passwords and enable two-factor authentication', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Keep WordPress, themes, and plugins updated', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Use HTTPS (SSL/TLS) for your entire site', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Regular backups stored off-site', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Limit login attempts at the server/firewall level', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Use security plugins for malware scanning', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Restrict file permissions (directories: 755, files: 644)', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Consider using a Web Application Firewall (WAF)', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Protect the wp-admin directory with an additional HTTP authentication layer (BasicAuth)', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Change the default database table prefix from wp_ to a custom value', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Rename the default admin account to a non-obvious username', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Restrict database user privileges to SELECT, INSERT, UPDATE and DELETE only', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Protect wp-config.php by moving it one directory above the WordPress root or restricting access via .htaccess', 'security-hardener' ); ?></li>
-					<li><?php esc_html_e( 'Block direct access to files in wp-includes/ by adding the following rules to your .htaccess file (outside the WordPress tags).', 'security-hardener' ); ?></li>
-				</ul>
-				<p>
-					<?php
-					printf(
-						/* translators: %s: URL to WordPress hardening guide */
-						wp_kses_post( __( 'For more information, see the official <a href="%s" target="_blank">WordPress Hardening Guide</a>.', 'security-hardener' ) ),
-						'https://developer.wordpress.org/advanced-administration/security/hardening/'
-					);
-					?>
-				</p>
+				<?php $this->render_checklist(); ?>
 
 			</div><!-- .wrap -->
 			<?php
@@ -1220,20 +1414,16 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				<?php
 			}
 
-			// Check file permissions
-			$this->check_file_permissions_notice();
+			// Check file permissions is now rendered inline in render_settings_page()
 		}
 
 		/**
-		 * Check file permissions and show notice
+		 * Render file permissions check as an inline section on the settings page.
+		 *
+		 * Shows a success notice when all paths are correct, or a table listing
+		 * only the paths with issues when problems are found.
 		 */
-		private function check_file_permissions_notice(): void {
-			// Only show on plugin settings page
-			$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-			if ( ! $screen || 'settings_page_security-hardener' !== $screen->id ) {
-				return;
-			}
-
+		private function render_file_permissions(): void {
 			if ( ! function_exists( 'get_home_path' ) ) {
 				require_once ABSPATH . 'wp-admin/includes/file.php';
 			}
@@ -1242,25 +1432,21 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			$checks     = array(
 				array(
 					'path'        => ABSPATH . 'wp-config.php',
-					'type'        => 'file',
 					'recommended' => array( '0600', '0640', '0644' ),
 					'label'       => 'wp-config.php',
 				),
 				array(
 					'path'        => get_home_path(),
-					'type'        => 'dir',
 					'recommended' => array( '0755', '0750' ),
 					'label'       => __( 'WordPress root directory', 'security-hardener' ),
 				),
 				array(
 					'path'        => WP_CONTENT_DIR,
-					'type'        => 'dir',
 					'recommended' => array( '0755', '0750' ),
 					'label'       => 'wp-content',
 				),
 				array(
 					'path'        => $upload_dir['basedir'],
-					'type'        => 'dir',
 					'recommended' => array( '0755', '0750' ),
 					'label'       => __( 'Uploads directory', 'security-hardener' ),
 				),
@@ -1272,41 +1458,64 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				if ( ! file_exists( $check['path'] ) ) {
 					continue;
 				}
-
 				$perms = substr( sprintf( '%o', fileperms( $check['path'] ) ), -4 );
-
 				if ( ! in_array( $perms, $check['recommended'], true ) ) {
-					$issues[] = sprintf(
-						/* translators: 1: file/directory name, 2: current permissions, 3: recommended permissions */
-						__( '%1$s has permissions %2$s (recommended: %3$s)', 'security-hardener' ),
-						'<code>' . esc_html( $check['label'] ) . '</code>',
-						'<code>' . esc_html( $perms ) . '</code>',
-						'<code>' . esc_html( implode( ', ', $check['recommended'] ) ) . '</code>'
+					$issues[] = array(
+						'label'       => $check['label'],
+						'current'     => $perms,
+						'recommended' => implode( ', ', $check['recommended'] ),
 					);
 				}
 			}
+			?>
+			<hr style="margin:24px 0;">
+			<h2><?php esc_html_e( 'File Permissions', 'security-hardener' ); ?></h2>
 
-			if ( ! empty( $issues ) ) {
-				?>
-				<div class="notice notice-warning">
-					<p><strong><?php esc_html_e( 'File Permission Issues Detected:', 'security-hardener' ); ?></strong></p>
-					<ul style="list-style: disc; padding-left: 20px;">
-						<?php foreach ( $issues as $issue ) : ?>
-							<li><?php echo wp_kses_post( $issue ); ?></li>
-						<?php endforeach; ?>
-					</ul>
-					<p>
-						<?php
-						printf(
-							/* translators: %s: URL to file permissions documentation */
-							wp_kses_post( __( 'Learn more about <a href="%s" target="_blank">WordPress file permissions</a>.', 'security-hardener' ) ),
-							'https://developer.wordpress.org/advanced-administration/server/file-permissions/'
-						);
-						?>
-					</p>
+			<?php if ( empty( $issues ) ) : ?>
+				<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#f0f6f0;border:1px solid #c3c4c7;border-radius:4px;font-size:13px;color:#1d2327;">
+					<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
+					<?php esc_html_e( 'All checked paths have correct file permissions.', 'security-hardener' ); ?>
 				</div>
+			<?php else : ?>
+				<div style="border:1px solid #c3c4c7;border-radius:4px;overflow:hidden;">
+					<table class="wp-list-table widefat fixed striped">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Path', 'security-hardener' ); ?></th>
+								<th style="width:120px;"><?php esc_html_e( 'Current', 'security-hardener' ); ?></th>
+								<th style="width:200px;"><?php esc_html_e( 'Recommended', 'security-hardener' ); ?></th>
+								<th style="width:140px;"><?php esc_html_e( 'Status', 'security-hardener' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $issues as $issue ) : ?>
+								<tr>
+									<td><code><?php echo esc_html( $issue['label'] ); ?></code></td>
+									<td><code><?php echo esc_html( $issue['current'] ); ?></code></td>
+									<td><code><?php echo esc_html( $issue['recommended'] ); ?></code></td>
+									<td>
+										<span style="display:inline-flex;align-items:center;gap:5px;">
+											<span style="width:7px;height:7px;border-radius:50%;background:#d63638;display:inline-block;flex-shrink:0;"></span>
+											<?php esc_html_e( 'Too permissive', 'security-hardener' ); ?>
+										</span>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+			<?php endif; ?>
+
+			<p style="font-size:12px;color:#646970;margin-top:8px;">
 				<?php
-			}
+				printf(
+					/* translators: %s: URL to file permissions documentation */
+					wp_kses_post( __( 'Learn more about <a href="%s" target="_blank">WordPress file permissions</a>.', 'security-hardener' ) ),
+					'https://developer.wordpress.org/advanced-administration/server/file-permissions/'
+				);
+				?>
+			</p>
+			<?php
 		}
 
 		/**

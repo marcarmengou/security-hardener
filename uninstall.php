@@ -31,6 +31,9 @@ delete_option( 'wpsh_options' );
 // Delete security logs.
 delete_option( 'wpsh_security_logs' );
 
+// Delete hardening checklist state.
+delete_option( 'wpsh_checklist' );
+
 // Delete login rate-limiting transients.
 // We cannot enumerate every hashed IP key ahead of time, so we retrieve
 // their option_names via a single parameterised SELECT (no raw DELETE),

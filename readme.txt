@@ -4,7 +4,7 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
-Stable tag: 2.0.2
+Stable tag: 2.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -162,6 +162,13 @@ Not required, but **strongly recommended**. HSTS features require HTTPS. For max
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 2.1.0 - 2026-03-26 =
+* Added: Interactive hardening checklist — users can mark each recommendation as done.
+* Improved: File permissions check moved from floating admin notice into the settings page.
+* Fixed: "Enable preload" description now clarifies it only adds the preload directive to the HSTS header.
+* Fixed: "Clean wp_head" description no longer uses HTML entities that rendered as literal text in some contexts.
+* Fixed: wp-includes recommendation text no longer implies a code snippet follows.
 
 = 2.0.2 - 2026-03-21 =
 * Improved: Number fields now show allowed range as permanent help text (Min/Max) below the label.
