@@ -3,7 +3,7 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, generic login errors, and IP-based rate limiting.
-Version: 2.1.0
+Version: 2.1.1
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '2.1.0' );
+define( 'WPSH_VERSION', '2.1.1' );
 define( 'WPSH_FILE', __FILE__ );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
@@ -801,31 +801,29 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				.wpsh-toggle{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;margin-top:1px;}
 				.wpsh-toggle input{opacity:0;width:0;height:0;position:absolute;}
 				.wpsh-toggle-track{position:absolute;inset:0;background:#c3c4c7;border-radius:20px;transition:background .15s;}
-				.wpsh-toggle input:checked~.wpsh-toggle-track{background:#2271b1;}
+				.wpsh-toggle input:checked~.wpsh-toggle-track{background:var(--wp-admin-theme-color,#2271b1);}
 				.wpsh-toggle-thumb{position:absolute;width:14px;height:14px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .15s;pointer-events:none;}
 				.wpsh-toggle input:checked~.wpsh-toggle-thumb{left:19px;}
-				.wpsh-toggle input:focus~.wpsh-toggle-track{box-shadow:0 0 0 2px #2271b1,0 0 0 4px rgba(34,113,177,.3);}
+				.wpsh-toggle input:focus~.wpsh-toggle-track{box-shadow:0 0 0 2px var(--wp-admin-theme-color,#2271b1),0 0 0 4px var(--wp-admin-theme-color-darker-10,rgba(34,113,177,.3));}
 				.wpsh-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-left:5px;vertical-align:middle;text-transform:uppercase;letter-spacing:.03em;}
 				.wpsh-badge-warn{background:#fcf9e8;color:#996800;border:1px solid #f0c33c;}
-				.wpsh-badge-https{background:#f0f6fc;color:#2271b1;border:1px solid #72aee6;}
+				.wpsh-badge-https{background:#f0f6fc;color:var(--wp-admin-theme-color,#2271b1);border:1px solid var(--wp-admin-theme-color-darker-10,#72aee6);}
 				.wpsh-hsts-warn{font-size:12px;color:#d63638;padding:8px 16px 0;font-weight:600;}
 				.wpsh-section-header{display:flex;align-items:center;justify-content:space-between;padding:20px 0 8px;}
 				.wpsh-logs-table{margin-top:8px;}
-				.wpsh-recommendations{margin-top:0;}
-				.wpsh-recommendations li{margin-bottom:4px;}
 				.wpsh-save-bar{margin:20px 0 4px;}
 				.wpsh-cl-header{display:flex;align-items:center;justify-content:space-between;margin-top:24px;}
 				.wpsh-cl-progress{display:flex;align-items:center;gap:8px;}
 				.wpsh-cl-bar{height:6px;width:120px;background:#c3c4c7;border-radius:3px;overflow:hidden;}
-				.wpsh-cl-bar-fill{height:100%;background:#2271b1;border-radius:3px;transition:width .2s;}
+				.wpsh-cl-bar-fill{height:100%;background:var(--wp-admin-theme-color,#2271b1);border-radius:3px;transition:width .2s;}
 				.wpsh-cl-pct{font-size:12px;color:#646970;white-space:nowrap;}
 				.wpsh-cl-item{display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid #f0f0f1;cursor:pointer;transition:background .1s;}
 				.wpsh-cl-item:last-child{border-bottom:none;}
 				.wpsh-cl-item:hover{background:#f6f7f7;}
-				.wpsh-cl-item:focus{outline:2px solid #2271b1;outline-offset:-2px;}
+				.wpsh-cl-item:focus{outline:2px solid var(--wp-admin-theme-color,#2271b1);outline-offset:-2px;}
 				.wpsh-cl-item.wpsh-cl-done{background:#f0f6f0;}
 				.wpsh-cl-check{flex-shrink:0;width:18px;height:18px;border:1.5px solid #c3c4c7;border-radius:3px;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .15s;}
-				.wpsh-cl-item.wpsh-cl-done .wpsh-cl-check{background:#2271b1;border-color:#2271b1;}
+				.wpsh-cl-item.wpsh-cl-done .wpsh-cl-check{background:var(--wp-admin-theme-color,#2271b1);border-color:var(--wp-admin-theme-color,#2271b1);}
 				.wpsh-cl-check svg{display:none;}
 				.wpsh-cl-item.wpsh-cl-done .wpsh-cl-check svg{display:block;}
 				.wpsh-cl-label{font-size:13px;line-height:1.45;color:#1d2327;}
@@ -1044,13 +1042,18 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 			<script>
 			(function() {
-				var ajaxUrl = <?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>;
-				var total   = <?php echo absint( $total ); ?>;
+				var ajaxUrl  = <?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>;
+				var total    = <?php echo absint( $total ); ?>;
+				var doneText = <?php
+					/* translators: 1: completed items count, 2: total items count */
+					echo wp_json_encode( __( '%1$d / %2$d done', 'security-hardener' ) );
+				?>;
 
 				function updateProgress( done ) {
-					var pct = total > 0 ? Math.round( done / total * 100 ) : 0;
+					var pct  = total > 0 ? Math.round( done / total * 100 ) : 0;
+					var text = doneText.replace( '%1$d', done ).replace( '%2$d', total );
 					document.getElementById( 'wpsh-bar-fill' ).style.width = pct + '%';
-					document.getElementById( 'wpsh-cl-pct' ).textContent    = done + ' / ' + total + ' done';
+					document.getElementById( 'wpsh-cl-pct' ).textContent   = text;
 				}
 
 				function sendToggle( id, checked, nonce ) {
@@ -1116,8 +1119,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			?>
 			<div class="wrap">
 				<h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
-
-				<?php settings_errors(); ?>
 
 				<div class="notice notice-info inline" style="margin-top:12px;">
 					<p>
@@ -1413,8 +1414,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				</div>
 				<?php
 			}
-
-			// Check file permissions is now rendered inline in render_settings_page()
 		}
 
 		/**

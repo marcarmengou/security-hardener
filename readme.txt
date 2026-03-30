@@ -4,7 +4,7 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
-Stable tag: 2.1.0
+Stable tag: 2.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -162,6 +162,13 @@ Not required, but **strongly recommended**. HSTS features require HTTPS. For max
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 2.1.1 - 2026-03-29 =
+* Improved: Interactive elements (toggles, checklist, progress bar) now use WordPress admin theme color variables.
+* Fixed: "Settings saved." notice no longer appears twice after saving settings.
+* Fixed: Checklist progress counter now stays translated when updated via AJAX.
+* Fixed: Removed orphan comment from show_admin_notices().
+* Fixed: Removed dead CSS for .wpsh-recommendations.
 
 = 2.1.0 - 2026-03-26 =
 * Added: Interactive hardening checklist — users can mark each recommendation as done.
