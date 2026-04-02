@@ -2,8 +2,8 @@
 /*
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
-Description: Basic hardening: secure headers, disable XML-RPC/pingbacks, hide version, block user enumeration, generic login errors, and IP-based rate limiting.
-Version: 2.1.1
+Description: Basic hardening: secure headers, login honeypot, user enumeration blocking, generic login errors, rate limiting, and more.
+Version: 2.2.0
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '2.1.1' );
+define( 'WPSH_VERSION', '2.2.0' );
 define( 'WPSH_FILE', __FILE__ );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
@@ -113,10 +113,21 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				add_filter( 'wp_sitemaps_add_provider', array( $this, 'remove_users_sitemap' ), 10, 2 );
 			}
 
+			// Block author feeds
+			if ( $this->get_option( 'block_author_feeds', false ) ) {
+				add_action( 'template_redirect', array( $this, 'block_author_feeds' ), 1 );
+			}
+
 			// Login security
 			if ( $this->get_option( 'secure_login', true ) ) {
 				add_filter( 'login_errors', array( $this, 'generic_login_errors' ) );
 				add_action( 'login_init', array( $this, 'remove_login_hints' ) );
+			}
+
+			// Login honeypot
+			if ( $this->get_option( 'login_honeypot', true ) ) {
+				add_action( 'login_form', array( $this, 'add_honeypot_field' ) );
+				add_filter( 'authenticate', array( $this, 'check_honeypot' ), 1, 3 );
 			}
 
 			// Login rate limiting
@@ -136,6 +147,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// Clean wp_head
 			if ( $this->get_option( 'clean_head', true ) ) {
 				$this->cleanup_wp_head();
+			}
+
+			// Disable Application Passwords
+			if ( $this->get_option( 'disable_application_passwords', true ) ) {
+				add_filter( 'wp_is_application_passwords_available', '__return_false' );
 			}
 
 			// Admin interface
@@ -190,9 +206,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 				// User enumeration
 				'block_user_enum'          => 1,
+				'block_author_feeds'       => 0, // Off by default — may affect subscribers to author feeds
 
 				// Login security
 				'secure_login'             => 1,
+				'login_honeypot'           => 1,
 				'rate_limit_login'         => 1,
 				'rate_limit_attempts'      => 5,
 				'rate_limit_minutes'       => 15,
@@ -215,8 +233,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'hsts_preload'             => 0,
 
 				// Advanced
-				'log_security_events'      => 1,
-				'delete_data_on_uninstall' => 0,
+				'log_security_events'          => 1,
+				'disable_application_passwords' => 1, // On by default — enable only if REST API integrations require it
+				'delete_data_on_uninstall'      => 0,
 			];
 		}
 
@@ -414,6 +433,68 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 */
 		public function remove_users_sitemap( $provider, $name ): \WP_Sitemaps_Provider|false {
 			return ( 'users' === $name ) ? false : $provider;
+		}
+
+		/**
+		 * Block author feed pages to prevent username enumeration via RSS.
+		 *
+		 * Redirects /author/username/feed/ to a 404 without revealing
+		 * whether the author exists.
+		 */
+		public function block_author_feeds(): void {
+			if ( is_feed() && is_author() ) {
+				wp_die(
+					esc_html__( 'Page not found.', 'security-hardener' ),
+					esc_html__( '404 Not Found', 'security-hardener' ),
+					array( 'response' => 404 )
+				);
+			}
+		}
+
+		/**
+		 * Render the honeypot hidden field in the login form.
+		 *
+		 * Bots that auto-fill all fields will populate this field;
+		 * legitimate users never see or interact with it.
+		 */
+		public function add_honeypot_field(): void {
+			?>
+			<div style="display:none !important;" aria-hidden="true">
+				<label for="wpsh_hpf"><?php esc_html_e( 'Leave this field empty', 'security-hardener' ); ?></label>
+				<input type="text" id="wpsh_hpf" name="wpsh_hpf" value="" tabindex="-1" autocomplete="off" />
+			</div>
+			<?php
+		}
+
+		/**
+		 * Check the honeypot field on login.
+		 *
+		 * Runs at priority 1 on authenticate — before any credential check —
+		 * so bots are rejected immediately without touching the database.
+		 *
+		 * @param WP_User|WP_Error|null $user     Passed-through user object.
+		 * @param string                $username Username.
+		 * @param string                $password Password.
+		 * @return WP_User|WP_Error|null
+		 */
+		public function check_honeypot( $user, $username, $password ): \WP_User|\WP_Error|null {
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- honeypot check; nonce handled by WP core login form
+			if ( isset( $_POST['wpsh_hpf'] ) && '' !== $_POST['wpsh_hpf'] ) {
+				$this->log_security_event(
+					'honeypot_triggered',
+					sprintf(
+						/* translators: 1: IP address, 2: username */
+						__( 'Honeypot triggered from IP %1$s (username: %2$s)', 'security-hardener' ),
+						$this->get_client_ip(),
+						sanitize_text_field( $username )
+					)
+				);
+				return new \WP_Error(
+					'honeypot_triggered',
+					'<strong>' . esc_html__( 'Error:', 'security-hardener' ) . '</strong> ' . esc_html__( 'Invalid username or password.', 'security-hardener' )
+				);
+			}
+			return $user;
 		}
 
 		/**
@@ -731,7 +812,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'disable_pingbacks',
 				'hide_wp_version',
 				'block_user_enum',
+				'block_author_feeds',
 				'secure_login',
+				'login_honeypot',
 				'rate_limit_login',
 				'header_x_frame',
 				'header_x_content',
@@ -742,6 +825,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'hsts_preload',
 				'clean_head',
 				'log_security_events',
+				'disable_application_passwords',
 				'delete_data_on_uninstall',
 			];
 
@@ -918,7 +1002,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			$item_id = isset( $_POST['item_id'] ) ? absint( $_POST['item_id'] ) : null;
 			$checked = isset( $_POST['checked'] ) && '1' === $_POST['checked'];
 
-			if ( null === $item_id || $item_id > 13 ) {
+			if ( null === $item_id || $item_id > 15 ) {
 				wp_send_json_error( 'Invalid item', 400 );
 			}
 
@@ -931,7 +1015,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			}
 
 			update_option( self::CHECKLIST_OPTION, $state, false );
-			wp_send_json_success( [ 'done' => count( $state ), 'total' => 14 ] );
+			wp_send_json_success( [ 'done' => count( $state ), 'total' => 16 ] );
 		}
 
 		/**
@@ -947,7 +1031,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			}
 
 			update_option( self::CHECKLIST_OPTION, [], false );
-			wp_send_json_success( [ 'done' => 0, 'total' => 14 ] );
+			wp_send_json_success( [ 'done' => 0, 'total' => 16 ] );
 		}
 
 		/**
@@ -958,7 +1042,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		private function render_checklist(): void {
 			$state = get_option( self::CHECKLIST_OPTION, [] );
 			$done  = count( $state );
-			$total = 14;
+			$total = 16;
 			$pct   = $total > 0 ? round( $done / $total * 100 ) : 0;
 
 			$items = [
@@ -976,7 +1060,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				__( 'Restrict database user privileges to SELECT, INSERT, UPDATE and DELETE only', 'security-hardener' ),
 				__( 'Protect wp-config.php by moving it one directory above the WordPress root or restricting access via .htaccess', 'security-hardener' ),
 				__( 'Block direct access to files in wp-includes/ via .htaccess rules — see the WordPress Hardening Guide for the full snippet.', 'security-hardener' ),
+				__( 'Disable display_errors in PHP configuration — never expose PHP errors to visitors on live sites.', 'security-hardener' ),
+				__( 'Disable WP_DEBUG or set WP_DEBUG_DISPLAY to false in wp-config.php on live sites.', 'security-hardener' ),
 			];
+
+			$nonce = wp_create_nonce( 'wpsh_checklist_nonce' );
 
 			$nonce = wp_create_nonce( 'wpsh_checklist_nonce' );
 			?>
@@ -1187,6 +1275,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 									__( 'Block user enumeration', 'security-hardener' ),
 									__( 'Blocks ?author=N queries, canonical redirects, REST API user endpoints, and removes users from sitemaps.', 'security-hardener' )
 								);
+								$this->render_toggle_row(
+									'block_author_feeds',
+									__( 'Block author feeds', 'security-hardener' ),
+									__( 'Blocks /author/username/feed/ pages that can confirm existing usernames. Disabled by default — may affect subscribers to author-specific feeds.', 'security-hardener' )
+								);
 								?>
 							</div>
 						</div>
@@ -1202,6 +1295,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 									'secure_login',
 									__( 'Generic login errors', 'security-hardener' ),
 									__( "Don't reveal whether the username or password was incorrect.", 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'login_honeypot',
+									__( 'Login honeypot', 'security-hardener' ),
+									__( 'Adds a hidden field to the login form. Bots that fill it in are blocked before any credential check.', 'security-hardener' )
 								);
 								$this->render_toggle_row(
 									'rate_limit_login',
@@ -1316,6 +1414,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 									__( 'Keeps a log of the last 100 security events.', 'security-hardener' )
 								);
 								$this->render_toggle_row(
+									'disable_application_passwords',
+									__( 'Disable Application Passwords', 'security-hardener' ),
+									__( 'Blocks Application Passwords for API authentication. Disable only if you use the WordPress mobile app or other remote integrations.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
 									'delete_data_on_uninstall',
 									__( 'Delete all data on uninstall', 'security-hardener' ),
 									__( 'Permanently deletes all settings and logs on uninstall. Disabled by default.', 'security-hardener' ),
@@ -1335,7 +1438,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 				<?php $this->render_security_logs(); ?>
 
-				<?php $this->render_file_permissions(); ?>
+				<?php $this->render_system_status(); ?>
 
 				<?php $this->render_checklist(); ?>
 
@@ -1417,12 +1520,12 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		}
 
 		/**
-		 * Render file permissions check as an inline section on the settings page.
+		 * Render the System Status section — file permissions and WP_DEBUG check.
 		 *
-		 * Shows a success notice when all paths are correct, or a table listing
-		 * only the paths with issues when problems are found.
+		 * Always visible. Shows a green indicator when everything is correct,
+		 * or a detailed warning when issues are found.
 		 */
-		private function render_file_permissions(): void {
+		private function render_system_status(): void {
 			if ( ! function_exists( 'get_home_path' ) ) {
 				require_once ABSPATH . 'wp-admin/includes/file.php';
 			}
@@ -1451,7 +1554,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				),
 			);
 
-			$issues = array();
+			$perm_issues = array();
 
 			foreach ( $checks as $check ) {
 				if ( ! file_exists( $check['path'] ) ) {
@@ -1459,61 +1562,102 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				}
 				$perms = substr( sprintf( '%o', fileperms( $check['path'] ) ), -4 );
 				if ( ! in_array( $perms, $check['recommended'], true ) ) {
-					$issues[] = array(
+					$perm_issues[] = array(
 						'label'       => $check['label'],
 						'current'     => $perms,
 						'recommended' => implode( ', ', $check['recommended'] ),
 					);
 				}
 			}
+
+			$debug_issue = defined( 'WP_DEBUG' ) && WP_DEBUG && ( ! defined( 'WP_DEBUG_DISPLAY' ) || WP_DEBUG_DISPLAY );
 			?>
 			<hr style="margin:24px 0;">
-			<h2><?php esc_html_e( 'File Permissions', 'security-hardener' ); ?></h2>
+			<h2><?php esc_html_e( 'System Status', 'security-hardener' ); ?></h2>
 
-			<?php if ( empty( $issues ) ) : ?>
-				<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#f0f6f0;border:1px solid #c3c4c7;border-radius:4px;font-size:13px;color:#1d2327;">
-					<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
-					<?php esc_html_e( 'All checked paths have correct file permissions.', 'security-hardener' ); ?>
-				</div>
-			<?php else : ?>
-				<div style="border:1px solid #c3c4c7;border-radius:4px;overflow:hidden;">
-					<table class="wp-list-table widefat fixed striped">
-						<thead>
-							<tr>
-								<th><?php esc_html_e( 'Path', 'security-hardener' ); ?></th>
-								<th style="width:120px;"><?php esc_html_e( 'Current', 'security-hardener' ); ?></th>
-								<th style="width:200px;"><?php esc_html_e( 'Recommended', 'security-hardener' ); ?></th>
-								<th style="width:140px;"><?php esc_html_e( 'Status', 'security-hardener' ); ?></th>
-							</tr>
-						</thead>
-						<tbody>
-							<?php foreach ( $issues as $issue ) : ?>
-								<tr>
-									<td><code><?php echo esc_html( $issue['label'] ); ?></code></td>
-									<td><code><?php echo esc_html( $issue['current'] ); ?></code></td>
-									<td><code><?php echo esc_html( $issue['recommended'] ); ?></code></td>
-									<td>
-										<span style="display:inline-flex;align-items:center;gap:5px;">
-											<span style="width:7px;height:7px;border-radius:50%;background:#d63638;display:inline-block;flex-shrink:0;"></span>
-											<?php esc_html_e( 'Too permissive', 'security-hardener' ); ?>
-										</span>
-									</td>
-								</tr>
-							<?php endforeach; ?>
-						</tbody>
-					</table>
-				</div>
-			<?php endif; ?>
+			<table class="wp-list-table widefat fixed" style="margin-top:12px;border:1px solid #c3c4c7;border-radius:4px;overflow:hidden;">
+				<thead>
+					<tr>
+						<th style="width:200px;"><?php esc_html_e( 'Check', 'security-hardener' ); ?></th>
+						<th><?php esc_html_e( 'Status', 'security-hardener' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
 
-			<p style="font-size:12px;color:#646970;margin-top:8px;">
-				<?php
-				printf(
-					/* translators: %s: URL to file permissions documentation */
-					wp_kses_post( __( 'Learn more about <a href="%s" target="_blank">WordPress file permissions</a>.', 'security-hardener' ) ),
-					'https://developer.wordpress.org/advanced-administration/server/file-permissions/'
-				);
-				?>
-			</p>
+					<!-- File Permissions -->
+					<tr>
+						<td style="font-weight:600;"><?php esc_html_e( 'File permissions', 'security-hardener' ); ?></td>
+						<td>
+							<?php if ( empty( $perm_issues ) ) : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
+									<?php esc_html_e( 'All checked paths have correct file permissions.', 'security-hardener' ); ?>
+								</span>
+							<?php else : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;margin-bottom:10px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#d63638;flex-shrink:0;display:inline-block;"></span>
+									<?php esc_html_e( 'Permission issues detected.', 'security-hardener' ); ?>
+								</span>
+								<div style="border:1px solid #c3c4c7;border-radius:4px;overflow:hidden;margin-top:8px;">
+									<table class="wp-list-table widefat fixed striped">
+										<thead>
+											<tr>
+												<th><?php esc_html_e( 'Path', 'security-hardener' ); ?></th>
+												<th style="width:100px;"><?php esc_html_e( 'Current', 'security-hardener' ); ?></th>
+												<th style="width:180px;"><?php esc_html_e( 'Recommended', 'security-hardener' ); ?></th>
+												<th style="width:130px;"><?php esc_html_e( 'Status', 'security-hardener' ); ?></th>
+											</tr>
+										</thead>
+										<tbody>
+											<?php foreach ( $perm_issues as $issue ) : ?>
+												<tr>
+													<td><code><?php echo esc_html( $issue['label'] ); ?></code></td>
+													<td><code><?php echo esc_html( $issue['current'] ); ?></code></td>
+													<td><code><?php echo esc_html( $issue['recommended'] ); ?></code></td>
+													<td>
+														<span style="display:inline-flex;align-items:center;gap:5px;">
+															<span style="width:7px;height:7px;border-radius:50%;background:#d63638;display:inline-block;flex-shrink:0;"></span>
+															<?php esc_html_e( 'Too permissive', 'security-hardener' ); ?>
+														</span>
+													</td>
+												</tr>
+											<?php endforeach; ?>
+										</tbody>
+									</table>
+								</div>
+								<p style="font-size:12px;color:#646970;margin:6px 0 0;">
+									<?php
+									printf(
+										/* translators: %s: URL to file permissions documentation */
+										wp_kses_post( __( 'Learn more about <a href="%s" target="_blank">WordPress file permissions</a>.', 'security-hardener' ) ),
+										'https://developer.wordpress.org/advanced-administration/server/file-permissions/'
+									);
+									?>
+								</p>
+							<?php endif; ?>
+						</td>
+					</tr>
+
+					<!-- WP_DEBUG -->
+					<tr>
+						<td style="font-weight:600;"><?php esc_html_e( 'WP_DEBUG', 'security-hardener' ); ?></td>
+						<td>
+							<?php if ( $debug_issue ) : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#dba617;flex-shrink:0;display:inline-block;"></span>
+									<?php esc_html_e( 'WP_DEBUG is enabled and errors are visible to visitors. Disable WP_DEBUG or set WP_DEBUG_DISPLAY to false in wp-config.php before going live.', 'security-hardener' ); ?>
+								</span>
+							<?php else : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
+									<?php esc_html_e( 'WP_DEBUG is not exposing errors to visitors.', 'security-hardener' ); ?>
+								</span>
+							<?php endif; ?>
+						</td>
+					</tr>
+
+				</tbody>
+			</table>
 			<?php
 		}
 

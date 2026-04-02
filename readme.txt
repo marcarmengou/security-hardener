@@ -4,11 +4,11 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
-Stable tag: 2.1.1
+Stable tag: 2.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Basic hardening: secure headers, user enumeration blocking, generic login errors, IP-based rate limiting, and WordPress security improvements.
+Basic hardening: secure headers, login honeypot, user enumeration blocking, generic login errors, rate limiting, and more.
 
 == Description ==
 
@@ -34,9 +34,11 @@ Basic hardening: secure headers, user enumeration blocking, generic login errors
 * Secure REST API user endpoints (require authentication)
 * Remove users from XML sitemaps
 * Prevent canonical redirects that expose usernames
+* Optionally block author feed pages (`/author/username/feed/`)
 
 **Login Security:**
 * Generic error messages (no username/password hints)
+* Login honeypot — silently blocks bots before any credential check
 * IP-based rate limiting with configurable thresholds
 * Security event logging (last 100 events)
 * Automatic blocking after failed attempts
@@ -52,6 +54,7 @@ Basic hardening: secure headers, user enumeration blocking, generic login errors
 * Hide WordPress version (meta generator tag and asset query strings)
 * Remove obsolete wp_head items (RSD, WLW manifest, shortlink, emoji scripts)
 * Security event logging system
+* Optionally disable Application Passwords for API authentication
 
 > ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
 
@@ -75,13 +78,14 @@ By default, the plugin enables:
 * XML-RPC disabled
 * User enumeration blocking
 * Generic login errors
+* Login honeypot
 * Login rate limiting (5 attempts per 15 minutes)
 * Security headers
 * WordPress version hiding (meta generator tag and asset query strings)
 * Clean wp_head output
 * Security event logging
 
-HSTS is disabled by default and should only be enabled if your entire site uses HTTPS.
+HSTS and author feed blocking are disabled by default. Disabling Application Passwords is also disabled by default — only enable it if you are sure no integrations or third-party apps use REST API authentication.
 
 = Does this plugin slow down my site? =
 
@@ -162,6 +166,13 @@ Not required, but **strongly recommended**. HSTS features require HTTPS. For max
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 2.2.0 - 2026-04-01 =
+* Added: Login honeypot — a hidden field added to the login form that silently blocks bots before any credential check.
+* Added: Block author feeds — optionally blocks /author/username/feed/ pages that can confirm existing usernames.
+* Added: Disable Application Passwords — disables REST API authentication via Application Passwords; enabled by default.
+* Added: System Status section — replaces the separate File Permissions section; shows file permissions and WP_DEBUG status in a unified table, always visible with with color-coded indicators.
+* Added: Two new items to the hardening checklist — disable display_errors in PHP configuration, and disable WP_DEBUG_DISPLAY on live sites.
 
 = 2.1.1 - 2026-03-29 =
 * Improved: Interactive elements (toggles, checklist, progress bar) now use WordPress admin theme color variables.
