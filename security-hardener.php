@@ -3,7 +3,7 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Basic hardening: secure headers, login honeypot, user enumeration blocking, generic login errors, rate limiting, and more.
-Version: 2.2.0
+Version: 2.4.1
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
@@ -19,8 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '2.2.0' );
-define( 'WPSH_FILE', __FILE__ );
+define( 'WPSH_VERSION', '2.4.1' );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
 if ( ! class_exists( 'WPHN_Hardener' ) ) :
@@ -77,8 +76,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			$this->define_security_constants();
 
 			// Activation/Deactivation hooks
-			register_activation_hook( WPSH_FILE, array( $this, 'activate' ) );
-			register_deactivation_hook( WPSH_FILE, array( $this, 'deactivate' ) );
+			register_activation_hook( __FILE__, array( $this, 'activate' ) );
+			register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 
 			// Core initialization
 			add_action( 'plugins_loaded', array( $this, 'init' ) );
@@ -113,6 +112,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				add_filter( 'wp_sitemaps_add_provider', array( $this, 'remove_users_sitemap' ), 10, 2 );
 			}
 
+			// Anonymize oEmbed author name
+			if ( $this->get_option( 'anonymize_oembed_author', false ) ) {
+				add_filter( 'oembed_response_data', array( $this, 'anonymize_oembed_author' ) );
+			}
+
 			// Block author feeds
 			if ( $this->get_option( 'block_author_feeds', false ) ) {
 				add_action( 'template_redirect', array( $this, 'block_author_feeds' ), 1 );
@@ -122,6 +126,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			if ( $this->get_option( 'secure_login', true ) ) {
 				add_filter( 'login_errors', array( $this, 'generic_login_errors' ) );
 				add_action( 'login_init', array( $this, 'remove_login_hints' ) );
+			}
+
+			// Block unsafe usernames
+			if ( $this->get_option( 'block_unsafe_usernames', true ) ) {
+				add_filter( 'illegal_user_logins', array( $this, 'get_blocked_usernames' ) );
 			}
 
 			// Login honeypot
@@ -206,11 +215,12 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 				// User enumeration
 				'block_user_enum'          => 1,
-				'block_author_feeds'       => 0, // Off by default — may affect subscribers to author feeds
+				'block_author_feeds'       => 0, // Off by default — breaks existing subscriptions to author-specific feeds
 
 				// Login security
 				'secure_login'             => 1,
 				'login_honeypot'           => 1,
+				'block_unsafe_usernames'   => 1,
 				'rate_limit_login'         => 1,
 				'rate_limit_attempts'      => 5,
 				'rate_limit_minutes'       => 15,
@@ -233,9 +243,10 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'hsts_preload'             => 0,
 
 				// Advanced
-				'log_security_events'          => 1,
-				'disable_application_passwords' => 1, // On by default — enable only if REST API integrations require it
-				'delete_data_on_uninstall'      => 0,
+				'log_security_events'           => 1,
+				'anonymize_oembed_author'        => 0, // Off by default — may affect oEmbed display
+				'disable_application_passwords'  => 1,
+				'delete_data_on_uninstall'       => 0,
 			];
 		}
 
@@ -257,7 +268,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param mixed  $default Default value.
 		 * @return mixed
 		 */
-		private function get_option( $key, $default = null ): mixed {
+		private function get_option( string $key, mixed $default = null ): mixed {
 			if ( isset( $this->options[ $key ] ) ) {
 				return $this->options[ $key ];
 			}
@@ -330,7 +341,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $methods XML-RPC methods.
 		 * @return array
 		 */
-		public function remove_xmlrpc_pingback( $methods ): array {
+		public function remove_xmlrpc_pingback( array $methods ): array {
 			unset( $methods['pingback.ping'] );
 			unset( $methods['pingback.extensions.getPingbacks'] );
 			return $methods;
@@ -351,6 +362,22 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				$src = remove_query_arg( 'ver', $src );
 			}
 			return $src;
+		}
+
+		/**
+		 * Anonymize the author_name field in oEmbed responses.
+		 *
+		 * The oEmbed endpoint returns author_name which by default matches the
+		 * display name and can reveal usernames. Replaces it with the site name
+		 * to prevent user enumeration via oEmbed without breaking embeds.
+		 *
+		 * @param array $data oEmbed response data.
+		 * @return array
+		 */
+		public function anonymize_oembed_author( array $data ): array {
+			$data['author_name'] = get_bloginfo( 'name' );
+			$data['author_url']  = home_url();
+			return $data;
 		}
 
 		/**
@@ -479,7 +506,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 */
 		public function check_honeypot( $user, $username, $password ): \WP_User|\WP_Error|null {
 			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- honeypot check; nonce handled by WP core login form
-			if ( isset( $_POST['wpsh_hpf'] ) && '' !== $_POST['wpsh_hpf'] ) {
+			$honeypot = isset( $_POST['wpsh_hpf'] ) ? sanitize_text_field( wp_unslash( $_POST['wpsh_hpf'] ) ) : '';
+			if ( '' !== $honeypot ) {
 				$this->log_security_event(
 					'honeypot_triggered',
 					sprintf(
@@ -495,6 +523,43 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				);
 			}
 			return $user;
+		}
+
+		/**
+		 * Returns the list of reserved usernames blocked from new user registration.
+		 *
+		 * Hooked to illegal_user_logins. Applies only when creating a new user.
+		 * Existing users whose login is already in the list are excluded so they
+		 * can continue to update their profile without being blocked.
+		 *
+		 * @param array $logins Existing list of illegal logins.
+		 * @return array<string>
+		 */
+		public function get_blocked_usernames( array $logins = [] ): array {
+			$blocked = [
+				'adm', 'admin', 'administrator', 'apache', 'author', 'backup', 'bin',
+				'boss', 'contact', 'contributor', 'daemon', 'dbadmin', 'demo', 'dev',
+				'developer', 'editor', 'example', 'ftp', 'guest', 'help', 'helpdesk',
+				'hostmaster', 'info', 'main', 'manager', 'marketing', 'master', 'mysql',
+				'nginx', 'office', 'owner', 'postmaster', 'root', 'sales', 'sample',
+				'sftp', 'siteadmin', 'ssh', 'staff', 'staging', 'support', 'sys',
+				'sysadmin', 'team', 'temp', 'temporary', 'test', 'tester', 'testing',
+				'trial', 'user', 'webmaster', 'wordpress', 'wpadmin',
+			];
+
+			// If this is a profile update for an existing user whose current login
+			// is already in the blocked list, return an empty list so WordPress does
+			// not prevent them from saving unrelated profile changes (email, password…).
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- read-only, no state change
+			$user_id = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
+			if ( $user_id > 0 ) {
+				$user = get_userdata( $user_id );
+				if ( $user && in_array( strtolower( $user->user_login ), $blocked, true ) ) {
+					return $logins;
+				}
+			}
+
+			return array_merge( $logins, $blocked );
 		}
 
 		/**
@@ -686,7 +751,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 *
 		 * @param array $links Links to ping.
 		 */
-		public function disable_self_pingbacks( &$links ): void {
+		public function disable_self_pingbacks( array &$links ): void {
 			$home = home_url();
 			foreach ( $links as $l => $link ) {
 				if ( str_starts_with( $link, $home ) ) {
@@ -701,7 +766,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $headers HTTP headers.
 		 * @return array
 		 */
-		public function remove_x_pingback( $headers ): array {
+		public function remove_x_pingback( array $headers ): array {
 			unset( $headers['X-Pingback'] );
 			return $headers;
 		}
@@ -733,7 +798,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string $message Event message.
 		 */
 		private function log_security_event( string $event_type, string $message ): void {
-			if ( ! $this->get_option( 'log_security_events', true ) ) {
+			if ( ! $this->get_option( 'log_security_events', 1 ) ) {
 				return;
 			}
 
@@ -797,7 +862,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $input Raw input.
 		 * @return array
 		 */
-		public function sanitize_options( $input ): array {
+		public function sanitize_options( mixed $input ): array {
 			if ( ! is_array( $input ) ) {
 				$input = [];
 			}
@@ -815,6 +880,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'block_author_feeds',
 				'secure_login',
 				'login_honeypot',
+				'block_unsafe_usernames',
 				'rate_limit_login',
 				'header_x_frame',
 				'header_x_content',
@@ -825,6 +891,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				'hsts_preload',
 				'clean_head',
 				'log_security_events',
+				'anonymize_oembed_author',
 				'disable_application_passwords',
 				'delete_data_on_uninstall',
 			];
@@ -903,6 +970,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				.wpsh-cl-pct{font-size:12px;color:#646970;white-space:nowrap;}
 				.wpsh-cl-item{display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid #f0f0f1;cursor:pointer;transition:background .1s;}
 				.wpsh-cl-item:last-child{border-bottom:none;}
+				.wpsh-cl-item:nth-last-child(2):nth-child(odd){border-bottom:none;}
 				.wpsh-cl-item:hover{background:#f6f7f7;}
 				.wpsh-cl-item:focus{outline:2px solid var(--wp-admin-theme-color,#2271b1);outline-offset:-2px;}
 				.wpsh-cl-item.wpsh-cl-done{background:#f0f6f0;}
@@ -914,6 +982,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				.wpsh-cl-item.wpsh-cl-done .wpsh-cl-label{color:#646970;text-decoration:line-through;text-decoration-color:#c3c4c7;}
 				@media(max-width:1200px){.wpsh-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
 				@media(max-width:782px){.wpsh-grid{grid-template-columns:minmax(0,1fr);}}
+				.wpsh-cl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+				.wpsh-cl-grid .wpsh-cl-item{border-right:1px solid #f0f0f1;}
+				.wpsh-cl-grid .wpsh-cl-item:nth-child(even){border-right:none;}
+				.wpsh-cl-grid .wpsh-cl-item:nth-last-child(-n+2){border-bottom:none;}
+				@media(max-width:782px){.wpsh-cl-grid{grid-template-columns:minmax(0,1fr);}.wpsh-cl-grid .wpsh-cl-item{border-right:none;}.wpsh-cl-grid .wpsh-cl-item:nth-last-child(2){border-bottom:1px solid #f0f0f1;}}
 			</style>
 			<?php
 		}
@@ -942,7 +1015,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					<?php endif; ?>
 				</div>
 				<label class="wpsh-toggle">
-					<input type="checkbox" name="<?php echo $input_name; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fully escaped above ?>" value="1" <?php echo $checked; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- output of checked() ?>>
+					<input type="checkbox" name="<?php echo $input_name; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fully escaped above ?>" value="1" aria-label="<?php echo esc_attr( $label ); ?>" <?php echo $checked; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- output of checked() ?>>
 					<div class="wpsh-toggle-track"></div>
 					<div class="wpsh-toggle-thumb"></div>
 				</label>
@@ -990,7 +1063,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * AJAX handler — toggle a single checklist item.
 		 *
-		 * Expects POST: nonce, item_id (int 0-13), checked (0|1).
+		 * Expects POST: nonce, item_id (int 0-19), checked (0|1).
 		 */
 		public function ajax_toggle_checklist(): void {
 			check_ajax_referer( 'wpsh_checklist_nonce', 'nonce' );
@@ -1002,7 +1075,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			$item_id = isset( $_POST['item_id'] ) ? absint( $_POST['item_id'] ) : null;
 			$checked = isset( $_POST['checked'] ) && '1' === $_POST['checked'];
 
-			if ( null === $item_id || $item_id > 15 ) {
+			if ( null === $item_id || $item_id > 19 ) {
 				wp_send_json_error( 'Invalid item', 400 );
 			}
 
@@ -1015,7 +1088,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			}
 
 			update_option( self::CHECKLIST_OPTION, $state, false );
-			wp_send_json_success( [ 'done' => count( $state ), 'total' => 16 ] );
+			wp_send_json_success( [ 'done' => count( $state ), 'total' => 20 ] );
 		}
 
 		/**
@@ -1031,7 +1104,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			}
 
 			update_option( self::CHECKLIST_OPTION, [], false );
-			wp_send_json_success( [ 'done' => 0, 'total' => 16 ] );
+			wp_send_json_success( [ 'done' => 0, 'total' => 20 ] );
 		}
 
 		/**
@@ -1042,7 +1115,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		private function render_checklist(): void {
 			$state = get_option( self::CHECKLIST_OPTION, [] );
 			$done  = count( $state );
-			$total = 16;
+			$total = 20;
 			$pct   = $total > 0 ? round( $done / $total * 100 ) : 0;
 
 			$items = [
@@ -1053,18 +1126,20 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				__( 'Limit login attempts at the server/firewall level', 'security-hardener' ),
 				__( 'Use security plugins for malware scanning', 'security-hardener' ),
 				__( 'Restrict file permissions (directories: 755, files: 644)', 'security-hardener' ),
-				__( 'Consider using a Web Application Firewall (WAF)', 'security-hardener' ),
-				__( 'Protect the wp-admin directory with an additional HTTP authentication layer (BasicAuth)', 'security-hardener' ),
+				__( 'Use a Web Application Firewall (WAF) to block distributed attacks.', 'security-hardener' ),
+				__( 'Add BasicAuth protection to the wp-admin directory.', 'security-hardener' ),
 				__( 'Change the default database table prefix from wp_ to a custom value', 'security-hardener' ),
-				__( 'Rename the default admin account to a non-obvious username', 'security-hardener' ),
-				__( 'Restrict database user privileges to SELECT, INSERT, UPDATE and DELETE only', 'security-hardener' ),
-				__( 'Protect wp-config.php by moving it one directory above the WordPress root or restricting access via .htaccess', 'security-hardener' ),
-				__( 'Block direct access to files in wp-includes/ via .htaccess rules — see the WordPress Hardening Guide for the full snippet.', 'security-hardener' ),
+				__( 'Restrict database user to SELECT, INSERT, UPDATE and DELETE only.', 'security-hardener' ),
+				__( 'Restrict access to wp-config.php via .htaccess or move it above the WordPress root.', 'security-hardener' ),
+				__( 'Block direct access to wp-includes/ via .htaccess — see the WordPress Hardening Guide.', 'security-hardener' ),
 				__( 'Disable display_errors in PHP configuration — never expose PHP errors to visitors on live sites.', 'security-hardener' ),
-				__( 'Disable WP_DEBUG or set WP_DEBUG_DISPLAY to false in wp-config.php on live sites.', 'security-hardener' ),
+				__( 'Delete wp-config.php backup files (.bak, .php~) from your server — they are publicly accessible.', 'security-hardener' ),
+				__( 'Remove database export files (.sql, .sql.gz) from publicly accessible directories.', 'security-hardener' ),
+				__( 'Disable directory browsing in your server configuration to prevent listing files in directories without an index file.', 'security-hardener' ),
+				__( 'Always use SFTP instead of FTP when transferring files — FTP sends credentials unencrypted.', 'security-hardener' ),
+				__( 'Only install plugins and themes from wordpress.org or trusted developers.', 'security-hardener' ),
+				__( 'Keep active plugins minimal — each one adds potential attack surface.', 'security-hardener' ),
 			];
-
-			$nonce = wp_create_nonce( 'wpsh_checklist_nonce' );
 
 			$nonce = wp_create_nonce( 'wpsh_checklist_nonce' );
 			?>
@@ -1089,7 +1164,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				</div>
 			</div>
 
-			<div class="wpsh-card" style="margin-top:12px;" id="wpsh-checklist">
+			<div class="wpsh-card wpsh-cl-grid" style="margin-top:12px;" id="wpsh-checklist">
 				<?php foreach ( $items as $id => $label ) : ?>
 					<div class="wpsh-cl-item<?php echo isset( $state[ $id ] ) ? ' wpsh-cl-done' : ''; ?>"
 						data-id="<?php echo absint( $id ); ?>"
@@ -1111,10 +1186,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				<p style="margin:0;font-size:12px;color:#646970;">
 					<?php esc_html_e( 'Your progress is saved automatically.', 'security-hardener' ); ?>
 				</p>
-				<button type="button" id="wpsh-cl-reset" class="button-link"
-					data-nonce="<?php echo esc_attr( $nonce ); ?>"
-					style="font-size:12px;color:#2271b1;">
-					<?php esc_html_e( 'Reset all', 'security-hardener' ); ?>
+				<button type="button" id="wpsh-cl-reset" class="button"
+					data-nonce="<?php echo esc_attr( $nonce ); ?>">
+					<?php esc_html_e( 'Reset recommendations', 'security-hardener' ); ?>
 				</button>
 			</div>
 
@@ -1208,13 +1282,6 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			<div class="wrap">
 				<h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
 
-				<div class="notice notice-info inline" style="margin-top:12px;">
-					<p>
-						<strong><?php esc_html_e( 'Important:', 'security-hardener' ); ?></strong>
-						<?php esc_html_e( 'Test these settings in a staging environment first. Some options may break functionality or third-party integrations.', 'security-hardener' ); ?>
-					</p>
-				</div>
-
 				<form method="post" action="options.php">
 					<?php settings_fields( 'wpsh_settings' ); ?>
 
@@ -1235,7 +1302,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 								$this->render_toggle_row(
 									'disable_file_mods',
 									__( 'Disable all file modifications', 'security-hardener' ),
-									__( 'Blocks plugin/theme updates and installations.', 'security-hardener' ),
+									__( 'Blocks all WordPress, plugin, and theme updates and installations. Enable only if updates are managed externally.', 'security-hardener' ),
 									$warn_badge
 								);
 								?>
@@ -1257,7 +1324,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 								$this->render_toggle_row(
 									'disable_pingbacks',
 									__( 'Disable pingbacks', 'security-hardener' ),
-									__( 'Removes the X-Pingback header and disables incoming and self-referencing pingbacks.', 'security-hardener' )
+									__( 'Disables incoming pingbacks and removes the X-Pingback header.', 'security-hardener' )
 								);
 								?>
 							</div>
@@ -1278,7 +1345,12 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 								$this->render_toggle_row(
 									'block_author_feeds',
 									__( 'Block author feeds', 'security-hardener' ),
-									__( 'Blocks /author/username/feed/ pages that can confirm existing usernames. Disabled by default — may affect subscribers to author-specific feeds.', 'security-hardener' )
+									__( 'Blocks author feed pages that expose usernames. May break existing feed subscriptions.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'anonymize_oembed_author',
+									__( 'Anonymize oEmbed author', 'security-hardener' ),
+									__( 'Replaces the author name in oEmbed responses with the site name.', 'security-hardener' )
 								);
 								?>
 							</div>
@@ -1299,7 +1371,17 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 								$this->render_toggle_row(
 									'login_honeypot',
 									__( 'Login honeypot', 'security-hardener' ),
-									__( 'Adds a hidden field to the login form. Bots that fill it in are blocked before any credential check.', 'security-hardener' )
+									__( 'Adds a hidden field to the login form to silently block bots.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'block_unsafe_usernames',
+									__( 'Block unsafe usernames', 'security-hardener' ),
+									__( 'Blocks registration of commonly targeted usernames (admin, root, test…). Existing users unaffected.', 'security-hardener' )
+								);
+								$this->render_toggle_row(
+									'disable_application_passwords',
+									__( 'Disable Application Passwords', 'security-hardener' ),
+									__( 'Turn off only if you use the WordPress mobile app, Jetpack, or other REST API integrations.', 'security-hardener' )
 								);
 								$this->render_toggle_row(
 									'rate_limit_login',
@@ -1352,31 +1434,20 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 									__( 'Restricts access to geolocation, microphone and camera.', 'security-hardener' )
 								);
 								?>
-							</div>
-						</div>
-
-						<!-- HSTS -->
-						<div class="wpsh-card">
-							<div class="wpsh-card-header">
-								<h2 class="wpsh-card-title">
-									<?php esc_html_e( 'HSTS', 'security-hardener' ); ?>
-									<?php echo $https_badge; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- pre-escaped ?>
-								</h2>
-							</div>
-							<div class="wpsh-card-body">
 								<?php if ( ! is_ssl() ) : ?>
-									<p class="wpsh-hsts-warn"><?php esc_html_e( '⚠ Your site is not using HTTPS. Do not enable HSTS.', 'security-hardener' ); ?></p>
+									<p class="wpsh-hsts-warn"><?php esc_html_e( '⚠ HSTS requires HTTPS. Your site is not currently using HTTPS.', 'security-hardener' ); ?></p>
 								<?php endif; ?>
 								<?php
 								$this->render_toggle_row(
 									'enable_hsts',
 									__( 'Enable HSTS', 'security-hardener' ),
-									__( 'Forces HTTPS. Only enable if your entire site supports HTTPS.', 'security-hardener' )
+									__( 'Forces HTTPS. Only enable if your entire site supports HTTPS.', 'security-hardener' ),
+									$https_badge
 								);
 								$this->render_toggle_row(
 									'hsts_subdomains',
 									__( 'Include subdomains', 'security-hardener' ),
-									__( 'Applies the HSTS policy to all subdomains. Only enable if all your subdomains also use HTTPS.', 'security-hardener' )
+									__( 'Extends HSTS to all subdomains. Only enable if all subdomains use HTTPS.', 'security-hardener' )
 								);
 								$this->render_toggle_row(
 									'hsts_preload',
@@ -1414,14 +1485,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 									__( 'Keeps a log of the last 100 security events.', 'security-hardener' )
 								);
 								$this->render_toggle_row(
-									'disable_application_passwords',
-									__( 'Disable Application Passwords', 'security-hardener' ),
-									__( 'Blocks Application Passwords for API authentication. Disable only if you use the WordPress mobile app or other remote integrations.', 'security-hardener' )
-								);
-								$this->render_toggle_row(
 									'delete_data_on_uninstall',
 									__( 'Delete all data on uninstall', 'security-hardener' ),
-									__( 'Permanently deletes all settings and logs on uninstall. Disabled by default.', 'security-hardener' ),
+									__( 'Permanently deletes all settings and logs on uninstall.', 'security-hardener' ),
 									$warn_badge
 								);
 								?>
@@ -1436,9 +1502,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 				</form>
 
-				<?php $this->render_security_logs(); ?>
-
 				<?php $this->render_system_status(); ?>
+
+				<?php $this->render_security_logs(); ?>
 
 				<?php $this->render_checklist(); ?>
 
@@ -1450,7 +1516,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * Render security logs section
 		 */
 		private function render_security_logs(): void {
-			if ( ! $this->get_option( 'log_security_events', true ) ) {
+			if ( ! $this->get_option( 'log_security_events', 1 ) ) {
 				return;
 			}
 
@@ -1520,10 +1586,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		}
 
 		/**
-		 * Render the System Status section — file permissions and WP_DEBUG check.
+		 * Render the System Status section.
 		 *
-		 * Always visible. Shows a green indicator when everything is correct,
-		 * or a detailed warning when issues are found.
+		 * Checks file permissions, WP_DEBUG, user registration, administrator
+		 * account count, PHP version, and database version. Collapses automatically
+		 * when all checks pass; expands when any issue is detected.
 		 */
 		private function render_system_status(): void {
 			if ( ! function_exists( 'get_home_path' ) ) {
@@ -1570,15 +1637,67 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				}
 			}
 
-			$debug_issue = defined( 'WP_DEBUG' ) && WP_DEBUG && ( ! defined( 'WP_DEBUG_DISPLAY' ) || WP_DEBUG_DISPLAY );
+			$debug_issue        = defined( 'WP_DEBUG' ) && WP_DEBUG && ( ! defined( 'WP_DEBUG_DISPLAY' ) || WP_DEBUG_DISPLAY );
+			$registration_open  = (bool) get_option( 'users_can_register' );
+			$admin_query        = new WP_User_Query( [ 'role' => 'administrator', 'count_total' => true, 'number' => 0 ] );
+			$admin_count        = $admin_query->get_total();
+			$too_many_admins    = $admin_count > 2;
+
+			// PHP version — uses the cached result from WordPress core (no external request made by this plugin).
+			$php_check        = wp_check_php_version();
+			$php_version      = PHP_VERSION;
+			$php_recommended  = $php_check ? $php_check['recommended_version'] : '8.2';
+			$php_ok           = ! $php_check || version_compare( $php_version, $php_recommended, '>=' );
+
+			// Database version — reads directly from wpdb without any external requests or
+			// additional queries beyond what wpdb already holds. Compares against the minimum
+			// versions declared in the plugin header (MySQL 8.0, MariaDB 10.6).
+			global $wpdb;
+			$db_raw_version = (string) $wpdb->db_version(); // real server version
+			$db_is_sqlite   = ! $db_raw_version;
+			$db_server_info = (string) $wpdb->db_server_info();
+			$db_is_mariadb  = str_contains( strtolower( $db_server_info ), 'mariadb' );
+			$db_engine      = $db_is_mariadb ? 'MariaDB' : 'MySQL';
+
+			// For MariaDB, db_version() may return the MySQL-compat version (e.g. 5.5.5).
+			// db_server_info() contains the real MariaDB version — extract it.
+			if ( $db_is_mariadb ) {
+				preg_match( '/(\d+\.\d+\.\d+)-MariaDB/i', $db_server_info, $db_ver_matches );
+				$db_version_str = $db_ver_matches[1] ?? $db_raw_version;
+			} else {
+				$db_version_str = $db_raw_version;
+			}
+
+			$db_status = 'good';
+			if ( ! $db_is_sqlite ) {
+				$db_min    = $db_is_mariadb ? '10.6' : '8.0';
+				$db_status = version_compare( $db_version_str, $db_min, '>=' ) ? 'good' : 'recommended';
+			}
+
+			// Determine if any check has an issue — if so, start expanded.
+			$has_issues = $debug_issue || $registration_open || ! $php_ok || $too_many_admins || ( 'good' !== $db_status ) || ! empty( $perm_issues );
 			?>
 			<hr style="margin:24px 0;">
-			<h2><?php esc_html_e( 'System Status', 'security-hardener' ); ?></h2>
+			<div style="display:flex;align-items:center;justify-content:space-between;">
+				<h2 style="margin:0;"><?php esc_html_e( 'System Status', 'security-hardener' ); ?></h2>
+				<?php if ( ! $has_issues ) : ?>
+					<span style="display:inline-flex;align-items:center;gap:8px;">
+						<span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#00a32a;font-weight:600;">
+							<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;display:inline-block;flex-shrink:0;"></span>
+							<?php esc_html_e( 'All checks passed', 'security-hardener' ); ?>
+						</span>
+						<button type="button" id="wpsh-status-toggle" class="button-link" style="font-size:12px;">
+							<?php esc_html_e( 'Show details', 'security-hardener' ); ?>
+						</button>
+					</span>
+				<?php endif; ?>
+			</div>
 
-			<table class="wp-list-table widefat fixed" style="margin-top:12px;border:1px solid #c3c4c7;border-radius:4px;overflow:hidden;">
+			<div id="wpsh-status-table" style="<?php echo $has_issues ? '' : 'display:none;'; ?>margin-top:12px;">
+			<table class="wp-list-table widefat fixed" style="border:1px solid #c3c4c7;border-radius:4px;overflow:hidden;">
 				<thead>
 					<tr>
-						<th style="width:200px;"><?php esc_html_e( 'Check', 'security-hardener' ); ?></th>
+						<th style="width:200px;"><?php esc_html_e( 'Checks', 'security-hardener' ); ?></th>
 						<th><?php esc_html_e( 'Status', 'security-hardener' ); ?></th>
 					</tr>
 				</thead>
@@ -1656,8 +1775,142 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 						</td>
 					</tr>
 
+					<!-- User registration -->
+					<tr>
+						<td style="font-weight:600;"><?php esc_html_e( 'User registration', 'security-hardener' ); ?></td>
+						<td>
+							<?php if ( $registration_open ) : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#dba617;flex-shrink:0;display:inline-block;"></span>
+									<?php esc_html_e( 'Public user registration is open. Disable it under Settings → General if your site does not need it.', 'security-hardener' ); ?>
+								</span>
+							<?php else : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
+									<?php esc_html_e( 'Public user registration is disabled.', 'security-hardener' ); ?>
+								</span>
+							<?php endif; ?>
+						</td>
+					</tr>
+
+					<!-- Administrator count -->
+					<tr>
+						<td style="font-weight:600;"><?php esc_html_e( 'Administrator accounts', 'security-hardener' ); ?></td>
+						<td>
+							<?php if ( $too_many_admins ) : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#dba617;flex-shrink:0;display:inline-block;"></span>
+									<?php
+									printf(
+										/* translators: %d: number of administrator accounts */
+										esc_html__( '%d administrator accounts found. Consider reducing this to the minimum necessary.', 'security-hardener' ),
+										absint( $admin_count )
+									);
+									?>
+								</span>
+							<?php else : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
+									<?php
+									printf(
+										/* translators: %d: number of administrator accounts */
+										esc_html__( '%d administrator account(s) found.', 'security-hardener' ),
+										absint( $admin_count )
+									);
+									?>
+								</span>
+							<?php endif; ?>
+						</td>
+					</tr>
+
+					<!-- PHP version -->
+					<tr>
+						<td style="font-weight:600;"><?php esc_html_e( 'PHP version', 'security-hardener' ); ?></td>
+						<td>
+							<?php if ( $php_ok ) : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
+									<?php
+									printf(
+										/* translators: %s: PHP version number */
+										esc_html__( 'PHP %s meets the recommended version.', 'security-hardener' ),
+										esc_html( $php_version )
+									);
+									?>
+								</span>
+							<?php else : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#dba617;flex-shrink:0;display:inline-block;"></span>
+									<?php
+									printf(
+										/* translators: 1: current PHP version, 2: recommended PHP version */
+										esc_html__( 'PHP %1$s is below the recommended version (%2$s). Consider upgrading.', 'security-hardener' ),
+										esc_html( $php_version ),
+										esc_html( $php_recommended )
+									);
+									?>
+								</span>
+							<?php endif; ?>
+						</td>
+					</tr>
+
+					<!-- Database version -->
+					<tr>
+						<td style="font-weight:600;"><?php esc_html_e( 'Database version', 'security-hardener' ); ?></td>
+						<td>
+							<?php if ( $db_is_sqlite ) : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#646970;flex-shrink:0;display:inline-block;"></span>
+									<?php esc_html_e( 'Non-standard database engine detected (e.g. SQLite). Check not applicable.', 'security-hardener' ); ?>
+								</span>
+							<?php elseif ( 'good' === $db_status ) : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;flex-shrink:0;display:inline-block;"></span>
+									<?php
+									printf(
+										/* translators: 1: database engine (MySQL/MariaDB), 2: version number */
+										esc_html__( '%1$s %2$s meets the recommended version.', 'security-hardener' ),
+										esc_html( $db_engine ),
+										esc_html( $db_version_str )
+									);
+									?>
+								</span>
+							<?php else : ?>
+								<span style="display:inline-flex;align-items:center;gap:6px;">
+									<span style="width:8px;height:8px;border-radius:50%;background:#dba617;flex-shrink:0;display:inline-block;"></span>
+									<?php
+									printf(
+										/* translators: 1: database engine (MySQL/MariaDB), 2: version number */
+										esc_html__( '%1$s %2$s is below the recommended version. Consider upgrading.', 'security-hardener' ),
+										esc_html( $db_engine ),
+										esc_html( $db_version_str )
+									);
+									?>
+								</span>
+							<?php endif; ?>
+						</td>
+					</tr>
+
 				</tbody>
 			</table>
+			</div>
+
+			<?php if ( ! $has_issues ) : ?>
+			<script>
+			(function() {
+				var btn   = document.getElementById( 'wpsh-status-toggle' );
+				var table = document.getElementById( 'wpsh-status-table' );
+				if ( ! btn || ! table ) return;
+				btn.addEventListener( 'click', function() {
+					var visible = table.style.display !== 'none';
+					table.style.display = visible ? 'none' : 'block';
+					btn.textContent     = visible
+						? <?php echo wp_json_encode( __( 'Show details', 'security-hardener' ) ); ?>
+						: <?php echo wp_json_encode( __( 'Hide details', 'security-hardener' ) ); ?>;
+				} );
+			}());
+			</script>
+			<?php endif; ?>
 			<?php
 		}
 

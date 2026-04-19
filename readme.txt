@@ -4,7 +4,7 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
-Stable tag: 2.2.0
+Stable tag: 2.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -18,10 +18,10 @@ Basic hardening: secure headers, login honeypot, user enumeration blocking, gene
 
 **File Security:**
 * Disable file editor in WordPress admin
-* Optionally disable all file modifications (blocks updates - use with caution)
+* Optionally disable all file modifications
 
 **XML-RPC Protection:**
-* Disable XML-RPC completely (enabled by default)
+* Disable XML-RPC completely
 * Remove pingback methods when XML-RPC is enabled
 
 **Pingback Protection:**
@@ -35,12 +35,14 @@ Basic hardening: secure headers, login honeypot, user enumeration blocking, gene
 * Remove users from XML sitemaps
 * Prevent canonical redirects that expose usernames
 * Optionally block author feed pages (`/author/username/feed/`)
+* Optionally anonymize the author name in oEmbed responses
 
 **Login Security:**
 * Generic error messages (no username/password hints)
-* Login honeypot — silently blocks bots before any credential check
+* Login honeypot
+* Block unsafe usernames
+* Application Passwords disabled by default
 * IP-based rate limiting with configurable thresholds
-* Security event logging (last 100 events)
 * Automatic blocking after failed attempts
 
 **Security Headers:**
@@ -53,8 +55,8 @@ Basic hardening: secure headers, login honeypot, user enumeration blocking, gene
 **Additional Hardening:**
 * Hide WordPress version (meta generator tag and asset query strings)
 * Remove obsolete wp_head items (RSD, WLW manifest, shortlink, emoji scripts)
-* Security event logging system
-* Optionally disable Application Passwords for API authentication
+* Security event logging (last 100 events)
+* System Status — monitors file permissions, WP_DEBUG, user registration, PHP version, administrator accounts, and database version
 
 > ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
 
@@ -79,13 +81,15 @@ By default, the plugin enables:
 * User enumeration blocking
 * Generic login errors
 * Login honeypot
+* Block unsafe usernames
 * Login rate limiting (5 attempts per 15 minutes)
 * Security headers
 * WordPress version hiding (meta generator tag and asset query strings)
 * Clean wp_head output
 * Security event logging
+* Application Passwords disabled
 
-HSTS and author feed blocking are disabled by default. Disabling Application Passwords is also disabled by default — only enable it if you are sure no integrations or third-party apps use REST API authentication.
+HSTS and author feed blocking are disabled by default. Application Passwords are disabled by default — re-enable this option only if you use the WordPress mobile app, Jetpack, or other REST API integrations that require them.
 
 = Does this plugin slow down my site? =
 
@@ -167,11 +171,49 @@ The plugin is designed for single-site installations. Multisite compatibility ha
 
 == Changelog ==
 
+= 2.4.1 - 2026-04-18 =
+* Improved: System Status PHP version check now uses wp_check_php_version().
+* Improved: System Status database version check now reads directly from wpdb.
+* Improved: System Status administrator count now uses WP_User_Query with count_total.
+* Improved: System Status PHP version and database version status messages are now consistent.
+* Improved: System Status PHP and database checks now show yellow when below the recommended version, green when above.
+* Fixed: Type hints added to get_option(), sanitize_options(), remove_xmlrpc_pingback(), remove_x_pingback(), and disable_self_pingbacks() for PHP 8.2+ consistency.
+* Fixed: render_system_status() docblock updated to reflect all six checks.
+* Fixed: WPSH_FILE constant removed — activation hooks now use __FILE__ directly.
+
+= 2.4.0 - 2026-04-18 =
+* Improved: Settings page reduced from 7 to 6 cards — HSTS options merged into Security headers card
+* Improved: "Disable Application Passwords" moved to Login security card, between Block unsafe usernames and Login rate limiting
+* Improved: System Status section now appears before Recent Security Events
+* Improved: System Status expanded with four new checks — public user registration status, PHP version, number of administrator accounts, and database version
+* Improved: System Status is now collapsible
+* Improved: Hardening checklist now displays in two columns to reduce vertical space
+* Improved: "Reset all" renamed to "Reset recommendations" and styled as a standard button for consistency with Clear Logs
+* Improved: Removed persistent "Important" notice from the settings page header
+* Improved: Added aria-label to all toggle inputs for screen reader accessibility
+* Improved: Checklist items shortened to fit a single line in two-column layout
+* Added: Four new checklist items — disable directory browsing, use SFTP instead of FTP, install plugins/themes from trusted sources only, keep active plugins minimal
+* Removed: Two redundant checklist items — "Rename the default admin account" and "Disable WP_DEBUG on live sites"
+* Fixed: AJAX checklist validation aligned with actual item count throughout
+
+= 2.3.1 - 2026-04-17 =
+* Fixed: Users with an existing unsafe username (e.g. admin) can now update their profile without being blocked — the restriction applies only to new user registration.
+
+= 2.3.0 - 2026-04-17 =
+* Added: Block unsafe usernames — prevents registration using commonly targeted usernames such as admin, root, test, or webmaster.
+* Added: Anonymize oEmbed author — replaces the author name in oEmbed responses with the site name to prevent username exposure.
+* Added: Two new items to the hardening checklist — remove wp-config.php backup files and remove publicly accessible database exports.
+* Fixed: Honeypot POST check now uses sanitize_text_field() and wp_unslash(), resolving a PHPCS warning.
+* Fixed: Duplicate wp_create_nonce() call removed from render_checklist().
+* Fixed: block_author_feeds description updated to clarify it will break existing subscriptions, not merely affect them.
+* Fixed: System Status table header corrected from "Check" to "Checks".
+* Fixed: log_security_events fallback value normalized from true to 1 for consistency with the options array.
+
 = 2.2.0 - 2026-04-01 =
 * Added: Login honeypot — a hidden field added to the login form that silently blocks bots before any credential check.
 * Added: Block author feeds — optionally blocks /author/username/feed/ pages that can confirm existing usernames.
 * Added: Disable Application Passwords — disables REST API authentication via Application Passwords; enabled by default.
-* Added: System Status section — replaces the separate File Permissions section; shows file permissions and WP_DEBUG status in a unified table, always visible with with color-coded indicators.
+* Added: System Status section — replaces the separate File Permissions section; shows file permissions and WP_DEBUG status in a unified table, always visible with color-coded indicators.
 * Added: Two new items to the hardening checklist — disable display_errors in PHP configuration, and disable WP_DEBUG_DISPLAY on live sites.
 
 = 2.1.1 - 2026-03-29 =
