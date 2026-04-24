@@ -2,8 +2,8 @@
 /*
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
-Description: Basic hardening: secure headers, login honeypot, user enumeration blocking, generic login errors, rate limiting, and more.
-Version: 2.4.1
+Description: Hardens WordPress with secure headers, login protection, user enumeration blocking, rate limiting, and a built-in security checklist.
+Version: 2.4.2
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.2
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '2.4.1' );
+define( 'WPSH_VERSION', '2.4.2' );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
 if ( ! class_exists( 'WPHN_Hardener' ) ) :
@@ -802,7 +802,10 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				return;
 			}
 
-			// Get existing logs
+			// Get existing logs.
+			// Note: get_option + update_option is not atomic. Under very high concurrency
+			// a log entry could theoretically be lost. Acceptable for a security log
+			// where occasional missed entries are preferable to locking complexity.
 			$logs = get_option( 'wpsh_security_logs', array() );
 
 			// Resolve IP once to avoid calling get_client_ip() twice
@@ -953,7 +956,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				.wpsh-toggle input{opacity:0;width:0;height:0;position:absolute;}
 				.wpsh-toggle-track{position:absolute;inset:0;background:#c3c4c7;border-radius:20px;transition:background .15s;}
 				.wpsh-toggle input:checked~.wpsh-toggle-track{background:var(--wp-admin-theme-color,#2271b1);}
-				.wpsh-toggle-thumb{position:absolute;width:14px;height:14px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .15s;pointer-events:none;}
+				.wpsh-toggle-thumb{position:absolute;width:14px;height:14px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .15s, right .15s;pointer-events:none;}
 				.wpsh-toggle input:checked~.wpsh-toggle-thumb{left:19px;}
 				.wpsh-toggle input:focus~.wpsh-toggle-track{box-shadow:0 0 0 2px var(--wp-admin-theme-color,#2271b1),0 0 0 4px var(--wp-admin-theme-color-darker-10,rgba(34,113,177,.3));}
 				.wpsh-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-left:5px;vertical-align:middle;text-transform:uppercase;letter-spacing:.03em;}
@@ -987,6 +990,10 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				.wpsh-cl-grid .wpsh-cl-item:nth-child(even){border-right:none;}
 				.wpsh-cl-grid .wpsh-cl-item:nth-last-child(-n+2){border-bottom:none;}
 				@media(max-width:782px){.wpsh-cl-grid{grid-template-columns:minmax(0,1fr);}.wpsh-cl-grid .wpsh-cl-item{border-right:none;}.wpsh-cl-grid .wpsh-cl-item:nth-last-child(2){border-bottom:1px solid #f0f0f1;}}
+				/* RTL support */
+				.rtl .wpsh-toggle-thumb{left:auto;right:3px;}
+				.rtl .wpsh-toggle input:checked~.wpsh-toggle-thumb{left:auto;right:19px;}
+				.rtl .wpsh-badge{margin-left:0;margin-right:5px;}
 			</style>
 			<?php
 		}
@@ -1119,24 +1126,24 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			$pct   = $total > 0 ? round( $done / $total * 100 ) : 0;
 
 			$items = [
-				__( 'Use strong passwords and enable two-factor authentication', 'security-hardener' ),
-				__( 'Keep WordPress, themes, and plugins updated', 'security-hardener' ),
-				__( 'Use HTTPS (SSL/TLS) for your entire site', 'security-hardener' ),
-				__( 'Regular backups stored off-site', 'security-hardener' ),
-				__( 'Limit login attempts at the server/firewall level', 'security-hardener' ),
-				__( 'Use security plugins for malware scanning', 'security-hardener' ),
-				__( 'Restrict file permissions (directories: 755, files: 644)', 'security-hardener' ),
+				__( 'Use strong passwords and enable two-factor authentication.', 'security-hardener' ),
+				__( 'Keep WordPress, themes, and plugins updated.', 'security-hardener' ),
+				__( 'Use HTTPS (SSL/TLS) for your entire site.', 'security-hardener' ),
+				__( 'Regular backups stored off-site.', 'security-hardener' ),
+				__( 'Limit login attempts at the server/firewall level.', 'security-hardener' ),
+				__( 'Use security plugins for malware scanning.', 'security-hardener' ),
+				__( 'Restrict file permissions (directories: 755, files: 644).', 'security-hardener' ),
 				__( 'Use a Web Application Firewall (WAF) to block distributed attacks.', 'security-hardener' ),
 				__( 'Add BasicAuth protection to the wp-admin directory.', 'security-hardener' ),
-				__( 'Change the default database table prefix from wp_ to a custom value', 'security-hardener' ),
+				__( 'Change the default database table prefix from wp_ to a custom value.', 'security-hardener' ),
 				__( 'Restrict database user to SELECT, INSERT, UPDATE and DELETE only.', 'security-hardener' ),
 				__( 'Restrict access to wp-config.php via .htaccess or move it above the WordPress root.', 'security-hardener' ),
-				__( 'Block direct access to wp-includes/ via .htaccess — see the WordPress Hardening Guide.', 'security-hardener' ),
-				__( 'Disable display_errors in PHP configuration — never expose PHP errors to visitors on live sites.', 'security-hardener' ),
-				__( 'Delete wp-config.php backup files (.bak, .php~) from your server — they are publicly accessible.', 'security-hardener' ),
+				__( 'Block direct access to wp-includes/ via .htaccess rules.', 'security-hardener' ),
+				__( 'Disable display_errors in PHP configuration to avoid exposing errors to visitors.', 'security-hardener' ),
+				__( 'Delete wp-config.php backup files (.bak, .php~) from your server.', 'security-hardener' ),
 				__( 'Remove database export files (.sql, .sql.gz) from publicly accessible directories.', 'security-hardener' ),
-				__( 'Disable directory browsing in your server configuration to prevent listing files in directories without an index file.', 'security-hardener' ),
-				__( 'Always use SFTP instead of FTP when transferring files — FTP sends credentials unencrypted.', 'security-hardener' ),
+				__( 'Disable directory browsing to prevent exposing file listings.', 'security-hardener' ),
+				__( 'Always use SFTP instead of FTP — FTP sends credentials unencrypted.', 'security-hardener' ),
 				__( 'Only install plugins and themes from wordpress.org or trusted developers.', 'security-hardener' ),
 				__( 'Keep active plugins minimal — each one adds potential attack surface.', 'security-hardener' ),
 			];
