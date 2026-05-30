@@ -2,9 +2,9 @@
 Contributors: marc4
 Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 8.2
-Stable tag: 2.4.2
+Stable tag: 2.4.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -170,6 +170,9 @@ Not required, but **strongly recommended**. HSTS features require HTTPS. For max
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 2.4.3 - 2026-05-25 =
+* Updated: Tested up to WordPress 7.0.
 
 = 2.4.2 - 2026-04-24 =
 * Improved: Added RTL language support.

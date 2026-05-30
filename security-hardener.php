@@ -3,9 +3,9 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Hardens WordPress with secure headers, login protection, user enumeration blocking, rate limiting, and a built-in security checklist.
-Version: 2.4.2
+Version: 2.4.3
 Requires at least: 6.9
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 8.2
 Author: Marc Armengou
 Author URI: https://www.marcarmengou.com/
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '2.4.2' );
+define( 'WPSH_VERSION', '2.4.3' );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
 if ( ! class_exists( 'WPHN_Hardener' ) ) :
