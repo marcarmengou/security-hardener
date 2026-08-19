@@ -3,9 +3,9 @@
 Plugin Name: Security Hardener
 Plugin URI: https://wordpress.org/plugins/security-hardener/
 Description: Hardens WordPress with secure headers, login protection, user enumeration blocking, rate limiting, and a built-in security checklist.
-Version: 2.4.3
+Version: 2.4.5
 Requires at least: 6.9
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.2
 Author: Marc Armengou
 Author URI: https://www.marcarmengou.com/
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Plugin constants
-define( 'WPSH_VERSION', '2.4.3' );
+define( 'WPSH_VERSION', '2.4.5' );
 define( 'WPSH_BASENAME', plugin_basename( __FILE__ ) );
 
 if ( ! class_exists( 'WPHN_Hardener' ) ) :
@@ -253,7 +253,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		/**
 		 * Get all options
 		 *
-		 * @return array
+		 * @return array<string, mixed>
 		 */
 		private function get_options(): array {
 			$options  = get_option( self::OPTION_NAME, array() );
@@ -420,17 +420,21 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		}
 
 		/**
-		 * Secure user REST API endpoints
+		 * Require authentication for REST API user endpoints.
+		 *
+		 * Only overrides the permission_callback on GET handlers to block
+		 * unauthenticated user enumeration. POST, PUT, PATCH, and DELETE handlers
+		 * are left untouched so WordPress Core capability checks (create_users,
+		 * edit_users, delete_users) remain fully enforced.
 		 *
 		 * @param array $endpoints REST endpoints.
 		 * @return array
 		 */
-		public function secure_user_endpoints( $endpoints ): array {
+		public function secure_user_endpoints( array $endpoints ): array {
 			if ( ! is_array( $endpoints ) ) {
 				return $endpoints;
 			}
 
-			// Require authentication for user endpoints
 			$user_endpoints = array(
 				'/wp/v2/users',
 				'/wp/v2/users/(?P<id>[\d]+)',
@@ -439,7 +443,13 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			foreach ( $user_endpoints as $endpoint ) {
 				if ( isset( $endpoints[ $endpoint ] ) ) {
 					foreach ( $endpoints[ $endpoint ] as &$handler ) {
-						if ( is_array( $handler ) ) {
+						if ( ! is_array( $handler ) ) {
+							continue;
+						}
+						// Only restrict GET handlers — never touch write methods.
+						$methods = isset( $handler['methods'] ) ? (array) $handler['methods'] : array();
+						$methods = array_map( 'strtoupper', $methods );
+						if ( in_array( 'GET', $methods, true ) && ! in_array( 'POST', $methods, true ) ) {
 							$handler['permission_callback'] = function () {
 								return is_user_logged_in();
 							};
@@ -458,7 +468,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string                $name Provider name.
 		 * @return WP_Sitemaps_Provider|false
 		 */
-		public function remove_users_sitemap( $provider, $name ): \WP_Sitemaps_Provider|false {
+		public function remove_users_sitemap( \WP_Sitemaps_Provider $provider, string $name ): \WP_Sitemaps_Provider|false {
 			return ( 'users' === $name ) ? false : $provider;
 		}
 
@@ -552,7 +562,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// not prevent them from saving unrelated profile changes (email, password…).
 			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- read-only, no state change
 			$user_id = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
-			if ( $user_id > 0 ) {
+			if ( $user_id > 0 && current_user_can( 'edit_user', $user_id ) ) {
 				$user = get_userdata( $user_id );
 				if ( $user && in_array( strtolower( $user->user_login ), $blocked, true ) ) {
 					return $logins;
@@ -568,7 +578,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param string $error Error message.
 		 * @return string
 		 */
-		public function generic_login_errors( $error ): string {
+		public function generic_login_errors( string $error ): string {
 			// Don't change the error if it's empty
 			if ( empty( $error ) ) {
 				return $error;
@@ -650,6 +660,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			$ip           = $this->get_client_ip();
 			$attempts_key = 'wpsh_login_attempts_' . md5( $ip );
 			$blocked_key  = 'wpsh_login_blocked_' . md5( $ip );
+
+			// Sanitize and truncate username to prevent log inflation from oversized inputs.
+			$username = mb_substr( sanitize_text_field( $username ), 0, 60 );
 
 			// Get current attempts
 			$attempts = get_transient( $attempts_key );
@@ -778,7 +791,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 			// Remove RSD link
 			remove_action( 'wp_head', 'rsd_link' );
 
-			// Remove Windows Live Writer manifest link
+			// Remove WLW manifest link
 			remove_action( 'wp_head', 'wlwmanifest_link' );
 
 			// Remove shortlink
@@ -1252,6 +1265,9 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				var resetBtn = document.getElementById( 'wpsh-cl-reset' );
 				if ( resetBtn ) {
 					resetBtn.addEventListener( 'click', function() {
+						if ( ! window.confirm( <?php echo wp_json_encode( __( 'Reset all recommendations? Your progress will be lost.', 'security-hardener' ) ); ?> ) ) {
+							return;
+						}
 						var fd = new FormData();
 						fd.append( 'action', 'wpsh_reset_checklist' );
 						fd.append( 'nonce',  resetBtn.dataset.nonce );
@@ -1484,7 +1500,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 								$this->render_toggle_row(
 									'clean_head',
 									__( 'Clean wp_head', 'security-hardener' ),
-									__( 'Removes RSD link, Windows Live Writer manifest, shortlink, and emoji scripts from the page head.', 'security-hardener' )
+									__( 'Removes RSD link, WLW manifest, shortlink, and emoji scripts from the page head.', 'security-hardener' )
 								);
 								$this->render_toggle_row(
 									'log_security_events',
@@ -1529,16 +1545,11 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 
 			$logs = get_option( 'wpsh_security_logs', array() );
 
-			if ( empty( $logs ) ) {
-				return;
-			}
-
-			// Reverse to show newest first, limit to 20
-			$logs = array_slice( array_reverse( $logs ), 0, 20 );
 			?>
 			<hr style="margin: 24px 0;">
 			<div class="wpsh-section-header">
 				<h2 style="margin: 0;"><?php esc_html_e( 'Recent Security Events', 'security-hardener' ); ?></h2>
+				<?php if ( ! empty( $logs ) ) : ?>
 				<form method="post" action="">
 					<?php wp_nonce_field( 'wpsh_clear_logs' ); ?>
 					<input type="hidden" name="wpsh_action" value="clear_logs" />
@@ -1546,7 +1557,15 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 						<?php esc_html_e( 'Clear Logs', 'security-hardener' ); ?>
 					</button>
 				</form>
+				<?php endif; ?>
 			</div>
+			<?php if ( empty( $logs ) ) : ?>
+				<p style="margin-top:12px;color:#646970;"><?php esc_html_e( 'No security events recorded yet.', 'security-hardener' ); ?></p>
+			<?php else : ?>
+			<?php
+			// Reverse to show newest first, limit to 20
+			$logs = array_slice( array_reverse( $logs ), 0, 20 );
+			?>
 			<table class="wp-list-table widefat fixed striped wpsh-logs-table">
 				<thead>
 					<tr>
@@ -1567,6 +1586,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 					<?php endforeach; ?>
 				</tbody>
 			</table>
+			<?php endif; ?>
 			<?php
 		}
 
@@ -1693,7 +1713,8 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 							<span style="width:8px;height:8px;border-radius:50%;background:#00a32a;display:inline-block;flex-shrink:0;"></span>
 							<?php esc_html_e( 'All checks passed', 'security-hardener' ); ?>
 						</span>
-						<button type="button" id="wpsh-status-toggle" class="button-link" style="font-size:12px;">
+						<button type="button" id="wpsh-status-toggle" class="button-link" style="font-size:12px;"
+							aria-expanded="false" aria-controls="wpsh-status-table">
 							<?php esc_html_e( 'Show details', 'security-hardener' ); ?>
 						</button>
 					</span>
@@ -1911,6 +1932,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 				btn.addEventListener( 'click', function() {
 					var visible = table.style.display !== 'none';
 					table.style.display = visible ? 'none' : 'block';
+					btn.setAttribute( 'aria-expanded', visible ? 'false' : 'true' );
 					btn.textContent     = visible
 						? <?php echo wp_json_encode( __( 'Show details', 'security-hardener' ) ); ?>
 						: <?php echo wp_json_encode( __( 'Hide details', 'security-hardener' ) ); ?>;
@@ -1927,7 +1949,7 @@ if ( ! class_exists( 'WPHN_Hardener' ) ) :
 		 * @param array $links Plugin action links.
 		 * @return array
 		 */
-		public function add_settings_link( $links ): array {
+		public function add_settings_link( array $links ): array {
 			$settings_link = sprintf(
 				'<a href="%s">%s</a>',
 				esc_url( admin_url( 'options-general.php?page=security-hardener' ) ),

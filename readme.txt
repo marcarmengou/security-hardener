@@ -1,10 +1,10 @@
-==== Security Hardener ===
+=== Security Hardener ===
 Contributors: marc4
 Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 2.4.3
+Stable tag: 2.4.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -43,7 +43,7 @@ Basic hardening: secure headers, login honeypot, user enumeration blocking, gene
 * Block unsafe usernames
 * Application Passwords disabled by default
 * IP-based rate limiting with configurable thresholds
-* Automatic blocking after failed attempts
+* Security event logging
 
 **Security Headers:**
 * `X-Frame-Options: SAMEORIGIN` (clickjacking protection)
@@ -55,7 +55,6 @@ Basic hardening: secure headers, login honeypot, user enumeration blocking, gene
 **Additional Hardening:**
 * Hide WordPress version (meta generator tag and asset query strings)
 * Remove obsolete wp_head items (RSD, WLW manifest, shortlink, emoji scripts)
-* Security event logging (last 100 events)
 * System Status — monitors file permissions, WP_DEBUG, user registration, PHP version, administrator accounts, and database version
 
 > ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
@@ -89,7 +88,7 @@ By default, the plugin enables:
 * Security event logging
 * Application Passwords disabled
 
-HSTS and author feed blocking are disabled by default. Application Passwords are disabled by default — re-enable this option only if you use the WordPress mobile app, Jetpack, or other REST API integrations that require them.
+HSTS and author feed blocking are disabled by default. Application Passwords are disabled by default — disable this option only if you use the WordPress mobile app, Jetpack, or other REST API integrations that require them.
 
 = Does this plugin slow down my site? =
 
@@ -170,6 +169,17 @@ Not required, but **strongly recommended**. HSTS features require HTTPS. For max
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 2.4.5 - 2026-08-01 =
+* Security fix.
+* Improved: Security logs now show a message when empty instead of hiding the section.
+
+= 2.4.4 - 2026-06-13 =
+* Fixed: Security improvement in get_blocked_usernames().
+* Fixed: Username length limited in security logs.
+* Fixed: Type hints and docblock corrections.
+* Updated: Some text improvements.
+* Improved: Accessibility and UX improvements.
 
 = 2.4.3 - 2026-05-25 =
 * Updated: Tested up to WordPress 7.0.
