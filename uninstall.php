@@ -14,8 +14,8 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 }
 
 // Only delete data if the user has explicitly opted in.
-// Retrieve the option before deleting it so we can honour the preference.
-$wpsh_options     = get_option( 'wpsh_options', [] );
+// Retrieve the option before deleting it so we can honor the preference.
+$wpsh_options     = get_option( 'wpsh_options', array() );
 $wpsh_delete_data = ! empty( $wpsh_options['delete_data_on_uninstall'] );
 
 if ( ! $wpsh_delete_data ) {
@@ -34,35 +34,8 @@ delete_option( 'wpsh_security_logs' );
 // Delete hardening checklist state.
 delete_option( 'wpsh_checklist' );
 
-// Delete login rate-limiting transients.
-// We cannot enumerate every hashed IP key ahead of time, so we retrieve
-// their option_names via a single parameterised SELECT (no raw DELETE),
-// then remove each entry through the standard WordPress Options API.
-// wp_cache_flush() clears any remaining in-memory copies afterwards.
-$wpsh_transient_prefixes = [
-	'_transient_wpsh_login_attempts_',
-	'_transient_timeout_wpsh_login_attempts_',
-	'_transient_wpsh_login_blocked_',
-	'_transient_timeout_wpsh_login_blocked_',
-];
-
-global $wpdb;
-
-foreach ( $wpsh_transient_prefixes as $wpsh_prefix ) {
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-	$wpsh_option_names = $wpdb->get_col(
-		$wpdb->prepare(
-			"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
-			$wpdb->esc_like( $wpsh_prefix ) . '%'
-		)
-	);
-
-	if ( ! empty( $wpsh_option_names ) ) {
-		foreach ( $wpsh_option_names as $wpsh_option_name ) {
-			delete_option( $wpsh_option_name );
-		}
-	}
-}
-
-// Flush the object cache to remove any in-memory copies of the deleted data.
-wp_cache_flush();
+// The login rate-limiting transients (wpsh_login_attempts_* and wpsh_login_blocked_*)
+// are keyed by a hash of the visitor's IP address, so they cannot be listed without
+// querying the database directly. They are intentionally left alone: each one expires
+// on its own (24 hours at most, the maximum block duration) and WordPress core removes
+// expired transients automatically.

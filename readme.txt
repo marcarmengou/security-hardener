@@ -4,62 +4,57 @@ Tags: security, hardening, headers, brute force, login protection
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 2.4.5
+Stable tag: 2.4.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Basic hardening: secure headers, login honeypot, user enumeration blocking, generic login errors, rate limiting, and more.
+Hardens WordPress with secure headers, login protection, user enumeration blocking, rate limiting, and a built-in security checklist.
 
 == Description ==
 
-**Security Hardener** applies WordPress security best practices based on the [WordPress Advanced Administration / Security / Hardening](https://developer.wordpress.org/advanced-administration/security/hardening/) documentation and widely accepted hardening measures. It uses WordPress core functions and follows best practices without modifying core files.
+**Security Hardener** applies WordPress security best practices based on the [WordPress Advanced Administration / Security / Hardening](https://developer.wordpress.org/advanced-administration/security/hardening/) documentation. It uses WordPress core functions and does not modify core files.
+
+It is a hardening tool, not a firewall or a malware scanner: it reduces your attack surface, and its checklist points out measures that have to be applied on your server.
 
 = Key Features =
 
-**File Security:**
-* Disable file editor in WordPress admin
-* Optionally disable all file modifications
+**Files and updates:**
+* Disable the file editor in WordPress admin
+* Optionally disable all file modifications (blocks updates and installations)
 
-**XML-RPC Protection:**
-* Disable XML-RPC completely
-* Remove pingback methods when XML-RPC is enabled
+**XML-RPC and pingbacks:**
+* Disable XML-RPC completely, or keep it and remove only its pingback methods
+* Remove the X-Pingback header and block incoming and self-pingbacks
 
-**Pingback Protection:**
-* Disable self-pingbacks
-* Remove X-Pingback header
-* Block incoming pingbacks
-
-**User Enumeration Protection:**
-* Block `/?author=N` queries (returns 404)
-* Secure REST API user endpoints (require authentication)
-* Remove users from XML sitemaps
-* Prevent canonical redirects that expose usernames
+**User enumeration:**
+* Block `/?author=N` queries (returns 404) and the canonical redirects that expose usernames
+* Require login for REST API user endpoints and remove users from XML sitemaps
 * Optionally block author feed pages (`/author/username/feed/`)
 * Optionally anonymize the author name in oEmbed responses
 
-**Login Security:**
+**Login security:**
 * Generic error messages (no username/password hints)
-* Login honeypot
-* Block unsafe usernames
+* Login honeypot to silently block bots
+* Block registration of unsafe usernames (admin, root, test…)
 * Application Passwords disabled by default
 * IP-based rate limiting with configurable thresholds
-* Security event logging
+* Security event log (last 100 events, including IP addresses and usernames of failed attempts)
 
-**Security Headers:**
-* `X-Frame-Options: SAMEORIGIN` (clickjacking protection)
-* `X-Content-Type-Options: nosniff` (MIME sniffing protection)
+**Security headers:**
+* `X-Frame-Options: SAMEORIGIN` and `X-Content-Type-Options: nosniff`
 * `Referrer-Policy: strict-origin-when-cross-origin`
-* `Permissions-Policy` (restricts geolocation, microphone, camera)
-* Optional HSTS (HTTP Strict Transport Security) for HTTPS sites — max-age set to 1 year
+* `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+* Optional HSTS for HTTPS sites (max-age of 1 year, with optional `includeSubDomains` and `preload`)
 
-**Additional Hardening:**
-* Hide WordPress version (meta generator tag and asset query strings)
-* Remove obsolete wp_head items (RSD, WLW manifest, shortlink, emoji scripts)
-* System Status — monitors file permissions, WP_DEBUG, user registration, PHP version, administrator accounts, and database version
+**Additional hardening:**
+* Hide the WordPress version (meta generator tag and asset query strings)
+* Remove obsolete `wp_head` items (RSD, WLW manifest, shortlink, emoji scripts)
+* System Status: file permissions, WP_DEBUG, user registration, administrator accounts, PHP version, and database version
+* Interactive hardening checklist with saved progress, for measures that must be applied on your server
 
 > ⚠️ **Important:** Always test security settings in a staging environment first. Some features may affect third-party integrations or plugins.
 
-**Privacy:** This plugin does not send data to external services and does not create custom database tables. It stores plugin settings and a security event log in the WordPress options table, and uses transients for temporary login attempt tracking. All data is preserved on uninstall by default and only deleted if the "Delete all data on uninstall" option is explicitly enabled.
+**Privacy:** This plugin does not send data to third parties and does not create custom database tables. It stores its settings, checklist progress, and a security event log in the WordPress options table. The log keeps the last 100 events, including IP addresses and the usernames used in failed login attempts, until you clear it. Login attempt tracking uses short-lived transients keyed by a hash of the IP address. The PHP check in System Status uses WordPress core's cached recommendation, which core may refresh from api.wordpress.org. All data is preserved on uninstall by default and only deleted if you explicitly enable "Delete all data on uninstall".
 
 == Installation ==
 
@@ -74,101 +69,77 @@ Basic hardening: secure headers, login honeypot, user enumeration blocking, gene
 
 = What are the default settings? =
 
-By default, the plugin enables:
-* File editor disabled
-* XML-RPC disabled
-* User enumeration blocking
-* Generic login errors
-* Login honeypot
-* Block unsafe usernames
-* Login rate limiting (5 attempts per 15 minutes)
-* Security headers
-* WordPress version hiding (meta generator tag and asset query strings)
-* Clean wp_head output
-* Security event logging
-* Application Passwords disabled
+Everything is enabled by default except: disabling all file modifications, blocking author feeds, anonymizing the oEmbed author, HSTS (with its subdomains and preload options), and deleting data on uninstall. Rate limiting blocks an IP address for 15 minutes after 5 failed attempts. You can review and change every option under **Settings > Security Hardener**.
 
-HSTS and author feed blocking are disabled by default. Application Passwords are disabled by default — disable this option only if you use the WordPress mobile app, Jetpack, or other REST API integrations that require them.
+= An app or integration stopped working after I activated the plugin. What do I do? =
+
+Two defaults can affect integrations: XML-RPC is disabled, and Application Passwords are disabled. If you use Jetpack, the WordPress mobile app, or other tools that rely on them, turn off **Disable XML-RPC** and/or **Disable Application Passwords** under **Settings > Security Hardener**.
 
 = Does this plugin slow down my site? =
 
 No. The plugin uses lightweight WordPress hooks and native functions. Security headers add negligible overhead, and rate limiting only checks transients during login attempts.
 
-= I use a CDN or proxy (Cloudflare, etc.). How do I get the correct IP? =
-
-By default, rate limiting uses `REMOTE_ADDR`. If behind a trusted proxy, add this to `wp-config.php`:
-
-`define('WPSH_TRUSTED_PROXIES', array(
-    '173.245.48.0',  // Example: Cloudflare IP range
-    // Add your proxy IPs here
-));`
-
-The plugin will then check `HTTP_CF_CONNECTING_IP` (Cloudflare) or `HTTP_X_FORWARDED_FOR` headers.
-
-= What headers does this plugin add? =
-
-When security headers are enabled:
-* `X-Frame-Options: SAMEORIGIN`
-* `X-Content-Type-Options: nosniff`
-* `Referrer-Policy: strict-origin-when-cross-origin`
-* `Permissions-Policy: geolocation=(), microphone=(), camera=()`
-
-When HSTS is enabled (HTTPS only):
-* `Strict-Transport-Security: max-age=31536000` (optionally with `includeSubDomains` if enabled)
-
-= Does the plugin work with page caching? =
-
-Yes. Security headers are sent at the PHP level before caching. However, if you use aggressive server-level caching, you may need to configure your cache to allow these headers through.
-
-= Can I use this with other security plugins? =
-
-Yes, but be careful of conflicts. If another plugin also:
-* Sends security headers, you may get duplicates (usually harmless)
-* Blocks user enumeration, one should be disabled
-* Has login rate limiting, choose one to avoid confusion
-
-This plugin is designed to be lightweight and focused on core WordPress hardening.
-
-= What happens to my data when I uninstall? =
-
-When you **uninstall** (not just deactivate) the plugin, data is preserved by default. If you have enabled the **"Delete all data on uninstall"** option under Settings > Security Hardener > Other Settings, then on uninstall:
-* All plugin settings are deleted
-* All security logs are deleted
-* All login rate limiting transients are cleared
-* Your WordPress installation is returned to its default state
-
-**Note:** Deactivating the plugin always preserves all settings.
-
-= Does this block the WordPress REST API? =
-
-No. The plugin only secures user-related endpoints by requiring authentication. All other REST API functionality works normally. Public endpoints like oEmbed continue to work.
-
 = I'm locked out after too many failed attempts. What do I do? =
 
-Failed login blocks expire automatically based on your configured window (default: 15 minutes). Wait for the block period to expire, or:
+Blocks are per IP address and expire automatically after your configured block duration (default: 15 minutes). Wait for the block to expire, try from a different IP address, or:
 
 1. Access your database (phpMyAdmin, etc.)
-2. Search for options with `_transient_wpsh_login_` in the name
+2. Search the options table for names containing `wpsh_login_`
 3. Delete those transient options
 4. Try logging in again
 
-= How do I know if the plugin is working? =
+If your site uses a persistent object cache (Redis, Memcached), flush the cache instead.
 
-1. Check **Settings > Security Hardener** for active features
-2. Review the "Recent Security Events" log
-3. Use browser dev tools to inspect HTTP headers
-4. Try accessing `/?author=1` (should return 404 if blocking is enabled)
-5. Test failed login attempts to verify rate limiting
+= I use a CDN or proxy (Cloudflare, etc.). How do I get the correct IP? =
+
+By default, rate limiting uses `REMOTE_ADDR`. If your site is behind a trusted proxy, add the proxy's exact IP addresses to `wp-config.php` (IP ranges in CIDR notation are not supported):
+
+`define( 'WPSH_TRUSTED_PROXIES', array( '203.0.113.10', '203.0.113.11' ) );`
+
+For requests coming from those addresses, the plugin will then read the `HTTP_CF_CONNECTING_IP` (Cloudflare) or `HTTP_X_FORWARDED_FOR` header.
+
+= Does the plugin work with page caching? =
+
+It depends on the cache. Security headers are added by PHP when WordPress builds a response, so a full-page cache that serves pages without running PHP (some server-level caches do) may skip them. Check your response headers with your browser's developer tools and, if they are missing, add them at the server level.
+
+= Can I use this with other security plugins? =
+
+Yes, but watch for overlaps. If another plugin also sends security headers you may get duplicates (usually harmless). If it also blocks user enumeration or limits login attempts, enable only one of them to avoid confusion.
+
+= Does this block the WordPress REST API? =
+
+No. The plugin only requires login to read user-related endpoints, and WordPress's own permission checks still apply. All other REST API functionality, including public endpoints like oEmbed, works normally.
+
+= What happens to my data when I uninstall? =
+
+When you uninstall (not just deactivate) the plugin, data is preserved by default. If you enable **Delete all data on uninstall** under **Settings > Security Hardener > Other settings**, uninstalling deletes all plugin settings, security logs, and checklist progress. Temporary login-attempt data is not deleted right away: it expires on its own within 24 hours at most, and WordPress removes it automatically.
+
+Deactivating the plugin always preserves all settings.
 
 = Does this plugin require HTTPS? =
 
-Not required, but **strongly recommended**. HSTS features require HTTPS. For maximum security, your entire site should use HTTPS with a valid SSL certificate.
+Not required, but strongly recommended. HSTS requires HTTPS, and for maximum security your entire site should use HTTPS with a valid certificate.
 
 = Is this plugin compatible with multisite? =
 
 The plugin is designed for single-site installations. Multisite compatibility has not been tested and is not officially supported at this time.
 
 == Changelog ==
+
+= 2.4.7 - 2026-10-28 =
+* Fixed: Login honeypot now blocks the attempt even with valid credentials.
+* Fixed: Checklist column divider in RTL languages.
+* Fixed: Checklist no longer shows an item as saved when saving fails.
+* Improved: Password reset no longer reveals whether an account exists.
+* Improved: System Status checks.
+* Improved: Security log shows the last 100 events in a scrollable box.
+* Improved: Accessibility of the settings fields.
+* Improved: Clear Logs now asks for confirmation.
+* Updated: Some text improvements.
+
+= 2.4.6 - 2026-10-27 =
+* Security fix.
+* Improved: System Status version checks.
 
 = 2.4.5 - 2026-08-01 =
 * Security fix.
